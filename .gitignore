@@ -1,0 +1,6 @@
+__pycache__/
+.pytest_cache/
+.vscode/
+demos/
+misc_images/
+output/
