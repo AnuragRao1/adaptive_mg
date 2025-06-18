@@ -16,7 +16,7 @@ def amh():
     ngmesh = geo.GenerateMesh(maxh=maxh)
     base = Mesh(ngmesh)
     amh = AdaptiveMeshHierarchy([base])
-    for i in range(1):
+    for i in range(2):
         for l, el in enumerate(ngmesh.Elements2D()):
             el.refine = 0
             # if random.random() < 0.5:

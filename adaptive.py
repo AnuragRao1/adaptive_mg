@@ -55,14 +55,12 @@ class AdaptiveMeshHierarchy(HierarchyBase):
         self.fine_to_coarse_cells[Fraction(len(self.meshes) - 1,1)] = np.array(f2c)
 
         # split both the fine and coarse meshes into the componenets that will be split, store those 
-        print("CONSTRUCTING SUBMESHES")
         (v, z, w, coarse_intersect, v_fine, z_fine, w_fine, fine_intersect, num_children) = split_to_submesh(mesh, coarse_mesh, c2f, f2c)
         coarse_mesh.mark_entities(coarse_intersect, 1)
         coarse_mesh.mark_entities(v, 2)
         coarse_mesh.mark_entities(z, 3)
         coarse_mesh.mark_entities(w, 4)
         coarse_mesh = RelabeledMesh(coarse_mesh, [coarse_intersect, v, z, w], [1, 2, 3, 4], name="Relabeled_coarse")
-        #c_subm = [Submesh(coarse_mesh, coarse_mesh.topology_dm.getDimension(), j) for j in [1,2,3,4]]
         c_subm = {j: Submesh(coarse_mesh, coarse_mesh.topology_dm.getDimension(), j) for j in [1,2,3,4] if any(num_children == j)}
        
         mesh.mark_entities(fine_intersect, 11)
@@ -70,20 +68,16 @@ class AdaptiveMeshHierarchy(HierarchyBase):
         mesh.mark_entities(z_fine, 33)
         mesh.mark_entities(w_fine, 44)
         mesh = RelabeledMesh(mesh, [fine_intersect, v_fine, z_fine, w_fine], [11, 22, 33, 44])
-        #f_subm = [Submesh(mesh, mesh.topology_dm.getDimension(), j) for j in [11,22,33,44]]
         f_subm = {int(str(j)[0]): Submesh(mesh, mesh.topology_dm.getDimension(), j) for j in [11, 22, 33, 44] if any(num_children == int(str(j)[0]))}
         
-        print("FINISHED CONSTRUCTING SUBMESHES")
         # update c2f and f2c for submeshes by mapping numberings on full mesh to numberings on coarse mesh
         n = [len([el for el in c2f if len(el) == j]) for j in [1,2,3,4]] # number of parents for each category
         c2f_adjusted = {j: np.zeros((n,j)) for n,j in zip(n,[1,2,3,4]) if n != 0}
         f2c_adjusted = {j: np.zeros((n * j, 1)) for n,j in zip(n,[1,2,3,4]) if n != 0}
 
-        print("GENERATING NUMERBING MAP")
         coarse_full_to_sub_map = {i: full_to_sub(coarse_mesh, c_subm[i]) for i in c_subm}
         fine_full_to_sub_map = {j: full_to_sub(mesh, f_subm[j]) for j in f_subm}
     
-        print("CONSTRUCTING PROPER NUMBERINGS FOR SUBMESHES")
         for i in range(len(c2f)):
             n = len(c2f[i])
             if 1 <= n <= 4:
@@ -98,12 +92,11 @@ class AdaptiveMeshHierarchy(HierarchyBase):
         # What might happen if the submesh for when its the fine and coarse are the same???
         # c2f_subm = [{Fraction(len(self.meshes) - 2, 1): c2f_n} for c2f_n in c2f_adjusted]
         # f2c_subm = [{Fraction(len(self.meshes) - 1, 1): f2c_n} for f2c_n in f2c_adjusted]
-        c2f_subm = [{Fraction(0, 1): c2f_n} for c2f_n in c2f_adjusted]
-        f2c_subm = [{Fraction(1, 1): f2c_n} for f2c_n in f2c_adjusted]
+        c2f_subm = {i: {Fraction(0, 1): c2f_adjusted[i]} for i in c2f_adjusted}
+        f2c_subm = {i: {Fraction(1, 1): f2c_adjusted[i]} for i in f2c_adjusted}
 
         
-        #hierarchy_dict = {f"{i+1}": HierarchyBase([c_subm[i], f_subm[i]], c2f_subm[i], f2c_subm[i], nested=True) for i in range(4) if c2f_subm[i][Fraction(len(self.meshes) - 2, 1)].shape[0] != 0}
-        hierarchy_dict = {i+1: HierarchyBase([c_subm[i], f_subm[i]], c2f_subm[i], f2c_subm[i], nested=True) for i in c_subm}
+        hierarchy_dict = {i: HierarchyBase([c_subm[i], f_subm[i]], c2f_subm[i], f2c_subm[i], nested=True) for i in c_subm}
         self.submesh_hierarchies.append(hierarchy_dict)
 
     def refine(self, refinements):
@@ -134,11 +127,10 @@ class AdaptiveMeshHierarchy(HierarchyBase):
 
     def recombine(self, split_funcs, f, child=True):      
         V = f.function_space()  
-
-
-        mesh_label = split_funcs[1].function_space().mesh().submesh_parent
+        mesh_label = split_funcs[[*split_funcs][0]].function_space().mesh().submesh_parent
         V_label = V.reconstruct(mesh=mesh_label)
         f_label = Function(V_label, val=f.dat)
+
         for split_label, val in split_funcs.items():
             assert val.function_space().mesh().submesh_parent == mesh_label
             if child:
@@ -157,14 +149,14 @@ def get_c2f_f2c_fd(mesh, num_parents, coarse_mesh):
     parents = ngmesh.GetParentSurfaceElements()
     fine_mapping = lambda x: mesh._cell_numbering.getOffset(x)
     coarse_mapping = lambda x: coarse_mesh._cell_numbering.getOffset(x)
-    u = Function(V); u.rename("fd_parent_element") # store what netgen returns
+    u = Function(V); u.rename("fd_parent_element")
    
     c2f = [[] for _ in range(num_parents)]
     f2c = [[] for _ in range(len(ngmesh.Elements2D()))]
     for l, el in enumerate(ngmesh.Elements2D()):
         pts = [P[k.nr-1] for k in list(el.vertices)] 
         bary = (1/3)*sum(pts)
-        k = mesh.locate_cell(bary) # compute center of current element and locate index of element in mesh
+        k = mesh.locate_cell(bary) 
         if parents[l] == -1 or l < num_parents: # need the second statement if multiple refinements occur on the same parent mesh
             u.dat.data[k] = coarse_mapping(l)
             f2c[fine_mapping(l)].append(coarse_mapping(l))
@@ -173,7 +165,7 @@ def get_c2f_f2c_fd(mesh, num_parents, coarse_mesh):
             u.dat.data[k] = coarse_mapping(parents[l])
             f2c[fine_mapping(l)].append(coarse_mapping(parents[l]))
             c2f[coarse_mapping(parents[l])].append(fine_mapping(l))
-        else: # correct mapping from Umberto
+        else:
             u.dat.data[k] = coarse_mapping(parents[parents[l]])
             f2c[fine_mapping(l)].append(coarse_mapping(parents[parents[l]]))
             c2f[coarse_mapping(parents[parents[l]])].append(fine_mapping(l))

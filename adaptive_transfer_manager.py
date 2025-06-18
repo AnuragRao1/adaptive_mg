@@ -49,8 +49,6 @@ class AdaptiveTransferManager(TransferManager):
             return
 
         for level in range(source_level, target_level, order):
-            
-            
             if level  + order == target_level:
                 target_v = target
             else:
@@ -83,49 +81,4 @@ class AdaptiveTransferManager(TransferManager):
         self.generic_transfer(uf, uc, transfer_op=self.tm.inject, amh=amh)
 
     def restrict(self, source, target, amh):
-        """Restrict a dual function.
-
-        :arg source: The source (fine grid) :class:`.Cofunction`.
-        :arg target: The target (coarse grid) :class:`.Cofunction`.
-        """
-        Vs_star = source.function_space()
-        Vt_star = target.function_space()
-        source_element = Vs_star.ufl_element()
-        target_element = Vt_star.ufl_element()
-        if not self.requires_transfer(Vs_star, Op.RESTRICT, source, target):
-            return
-
-        if all(self.is_native(e, Op.RESTRICT) for e in (source_element, target_element)):
-            self._native_transfer(source_element, Op.RESTRICT)(source, target)
-        elif type(source_element) is finat.ufl.MixedElement:
-            assert type(target_element) is finat.ufl.MixedElement
-            for source_, target_ in zip(source.subfunctions, target.subfunctions):
-                self.restrict(source_, target_)
-        else:
-            Vs = Vs_star.dual()
-            Vt = Vt_star.dual()
-            # Get some work vectors
-            dgsource = self.DG_work(Vs_star)
-            dgtarget = self.DG_work(Vt_star)
-            VDGs = dgsource.function_space().dual()
-            VDGt = dgtarget.function_space().dual()
-            work = self.work_vec(Vs)
-            dgwork = self.work_vec(VDGt)
-
-            # g \in Vs^* -> g \in VDGs^*
-            with source.dat.vec_ro as sv, dgsource.dat.vec_wo as dgv:
-                if self.use_averaging:
-                    work.pointwiseDivide(sv, self.V_dof_weights(Vs))
-                    self.V_approx_inv_mass(Vs, VDGs).multTranspose(work, dgv)
-                else:
-                    self.V_inv_mass_ksp(Vs).solve(sv, work)
-                    self.V_DG_mass(Vs, VDGs).mult(work, dgv)
-
-            # g \in VDGs^* -> g \in VDGt^*
-            self.restrict(dgsource, dgtarget)
-
-            # g \in VDGt^* -> g \in Vt^*
-            with dgtarget.dat.vec_ro as dgv, target.dat.vec_wo as t:
-                self.DG_inv_mass(VDGt).mult(dgv, dgwork)
-                self.V_DG_mass(Vt, VDGt).multTranspose(dgwork, t)
-        self.cache_dat_versions(Vs_star, Op.RESTRICT, source, target)
+        self.generic_transfer(source, target, transfer_op=self.tm.restrict, amh=amh)
