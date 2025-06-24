@@ -92,7 +92,7 @@ class AdaptiveMeshHierarchy(HierarchyBase):
         # What might happen if the submesh for when its the fine and coarse are the same???
         # c2f_subm = [{Fraction(len(self.meshes) - 2, 1): c2f_n} for c2f_n in c2f_adjusted]
         # f2c_subm = [{Fraction(len(self.meshes) - 1, 1): f2c_n} for f2c_n in f2c_adjusted]
-        c2f_subm = {i: {Fraction(0, 1): c2f_adjusted[i]} for i in c2f_adjusted}
+        c2f_subm = {i: {Fraction(0, 1): c2f_adjusted[i].astype(int)} for i in c2f_adjusted}
         f2c_subm = {i: {Fraction(1, 1): f2c_adjusted[i]} for i in f2c_adjusted}
 
         
@@ -110,7 +110,7 @@ class AdaptiveMeshHierarchy(HierarchyBase):
         mesh = Mesh(ngmesh)
         self.add_mesh(mesh)
     
-    def split_function(self, u, child=True):
+    def split_function(self, u, child=True, primal=None):
         V = u.function_space()
         full_mesh = V.mesh()
         _, level = get_level(full_mesh)
@@ -118,26 +118,47 @@ class AdaptiveMeshHierarchy(HierarchyBase):
         # to decide which submesh split to take
         ind = 1 if child else 0
         hierarchy_dict = self.submesh_hierarchies[int(level)-1-ind]
-        
+
         split_functions = {}
         for i in hierarchy_dict:
             V_split = V.reconstruct(mesh=hierarchy_dict[i].meshes[ind])
-            split_functions[i] = Function(V_split, name=str(i)).interpolate(u)
-        return split_functions
+            if isinstance(u, Function):
+                split_functions[i] = Function(V_split, name=str(i)).interpolate(u)
+            elif isinstance(u, Cofunction):
+                primal = primal.reconstruct(mesh=full_mesh)
+                split_functions[i] = cofun_interpolate(u, Cofunction(V_split, name=str(i)), primal=primal)
+                # if child:
+                #     split_label = int(str(i)*2)
+                #     split_functions[i] = Cofunction(V_split, name=str(i)).interpolate(u, subset=full_mesh.cell_subset(split_label))
+                # else:
+                #     split_functions[i] = Cofunction(V_split, name=str(i)).interpolate(u, subset=full_mesh.cell_subset(i))
 
-    def recombine(self, split_funcs, f, child=True):      
+        return split_functions
+    
+
+    def recombine(self, split_funcs, f, child=True, primal=None):      
         V = f.function_space()  
         mesh_label = split_funcs[[*split_funcs][0]].function_space().mesh().submesh_parent
         V_label = V.reconstruct(mesh=mesh_label)
-        f_label = Function(V_label, val=f.dat)
+        if isinstance(f, Function):
+            f_label = Function(V_label, val=f.dat)
+        elif isinstance(f, Cofunction):
+            f_label = Cofunction(V_label, val=f.dat)
 
         for split_label, val in split_funcs.items():
             assert val.function_space().mesh().submesh_parent == mesh_label
-            if child:
-                split_label = int(str(split_label)*2)
-                f_label.interpolate(val, subset=mesh_label.cell_subset(split_label))
-            else:
-                f_label.interpolate(val, subset=mesh_label.cell_subset(split_label))
+            if isinstance(f_label, Function):
+                if child:
+                    split_label = int(str(split_label)*2)
+                    f_label.interpolate(val, subset=mesh_label.cell_subset(split_label))
+                else:
+                    f_label.interpolate(val, subset=mesh_label.cell_subset(split_label))
+            if isinstance(f_label, Cofunction):
+                if child:
+                    split_label = int(str(split_label)*2)
+                    f_label = cofun_interpolate(val, f_label, primal=primal.reconstruct(mesh=val.function_space().mesh()), subset=mesh_label.cell_subset(split_label))
+                else: 
+                    f_label = cofun_interpolate(val, f_label, primal=primal.reconstruct(mesh=val.function_space().mesh()), subset=mesh_label.cell_subset(split_label))
         return f
 
 
@@ -171,7 +192,7 @@ def get_c2f_f2c_fd(mesh, num_parents, coarse_mesh):
             c2f[coarse_mapping(parents[parents[l]])].append(fine_mapping(l))
         
     #VTKFile(f"output/fd_mesh_test_{num_parents}.pvd").write(u)
-    return c2f, np.array(f2c)
+    return c2f, np.array(f2c).astype(int)
 
 def split_to_submesh(mesh, coarse_mesh, c2f, f2c):
     V = FunctionSpace(mesh, "DG", 0)
@@ -219,6 +240,22 @@ def full_to_sub(mesh, submesh):
     u1.interpolate(u2)
     
     return lambda x: u1.dat.data[x].astype(int)
+
+def cofun_as_function(c, primal):
+    return Function(primal, val=c.dat)
+
+def cofun_interpolate(rsource, rtarget, primal, subset=None):
+    usource = cofun_as_function(rsource, primal)
+    target_primal = primal.reconstruct(mesh=rtarget.function_space().mesh())
+    utarget = cofun_as_function(rtarget, target_primal)
+    utarget.interpolate(usource, subset=subset)
+    return rtarget
+
+
+
+
+
+
        
 
 if __name__ == "__main__":
@@ -335,7 +372,7 @@ if __name__ == "__main__":
     wp.Rectangle(2,2)
     face = wp.Face()
     geo = OCCGeometry(face, dim=2)
-    maxh = 1
+    maxh = 0.1
     ngmesh = geo.GenerateMesh(maxh=maxh)
     mesh = Mesh(ngmesh)
     amh = AdaptiveMeshHierarchy([mesh])
@@ -357,19 +394,33 @@ if __name__ == "__main__":
     xfine, yfine = SpatialCoordinate(amh[-1]) 
     Vcoarse = FunctionSpace(amh[0], "CG", 1)
     Vfine = FunctionSpace(amh[-1], "CG", 1)
-
     u = Function(Vcoarse)
     v = Function(Vfine)
     u.rename("coarse")
     v.rename("fine")
+
+    # PROLONG
+    
     #Evaluate sin function on coarse mesh
-    u.interpolate(sin(pi*xcoarse)*sin(pi*ycoarse))
+    # u.interpolate(sin(pi*xcoarse)*sin(pi*ycoarse))
 
+    # atm = AdaptiveTransferManager()
+
+    # atm.prolong(u, v, amh)
+    
+    # VTKFile("output/output_coarse_atmtest.pvd").write(u)
+    # VTKFile("output/output_fine_atmtest.pvd").write(v)
+
+    # RESTRICT
+    u.interpolate(xcoarse)
     atm = AdaptiveTransferManager()
+    atm.prolong(u, v, amh)
 
-    targets = atm.prolong(u, v, amh)
+    rf = Cofunction(Vfine.dual()).assign(1)
+    rc = Cofunction(Vcoarse.dual())
+    atm.restrict(rf, rc, amh, Vfine)
     
-    VTKFile("output/output_coarse_atmtest.pvd").write(u)
-    VTKFile("output/output_fine_atmtest.pvd").write(v)
-    
+    print(assemble(action(rc, u)) - assemble(action(rf, v)))
+    assert assemble(action(rc, u)) == assemble(action(rf, v))
+
    

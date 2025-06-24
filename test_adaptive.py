@@ -31,36 +31,78 @@ def amh():
 def atm():
     return AdaptiveTransferManager()
 
-def test_prolong_DG0(amh, atm):
+
+@pytest.mark.parametrize("operator", ["prolong", "inject"])
+def test_DG0(amh, atm, operator):
 
     V_coarse = FunctionSpace(amh[0], "DG", 0)
     V_fine = FunctionSpace(amh[-1], "DG", 0)
     u_coarse = Function(V_coarse)
     u_fine = Function(V_fine)
-    x, y = SpatialCoordinate(V_coarse.mesh())
-    step = conditional(ge(x, 0), 1, 0)
-    u_coarse.interpolate(step)
+    xc, yc = SpatialCoordinate(V_coarse.mesh())
+    stepc = conditional(ge(xc, 0), 1, 0)
+    xf, yf = SpatialCoordinate(V_fine.mesh())
+    stepf = conditional(ge(xf, 0), 1, 0)
 
-    assert errornorm(step, u_coarse) <= 1e-12
+    if operator == "prolong":
+        u_coarse.interpolate(stepc)
+        assert errornorm(stepc, u_coarse) <= 1e-12
 
-    atm.prolong(u_coarse, u_fine, amh)
-
-    x, y = SpatialCoordinate(V_fine.mesh())
-    step = conditional(ge(x, 0), 1, 0)
+        atm.prolong(u_coarse, u_fine, amh)
+        assert errornorm(stepf, u_fine) <= 1e-12
     
-    assert errornorm(step, u_fine) <= 1e-12
+    if operator == "inject":
+        u_fine.interpolate(stepf)
+        assert errornorm(stepf, u_fine) <= 1e-12
+
+        atm.inject(u_fine, u_coarse, amh)
+        assert errornorm(stepc, u_coarse) <= 1e-12
 
 
-def test_prolong_CG1(amh, atm):
+@pytest.mark.parametrize("operator", ["prolong", "inject"])
+def test_CG1(amh, atm, operator):
 
     V_coarse = FunctionSpace(amh[0], "CG", 1)
     V_fine = FunctionSpace(amh[-1], "CG", 1)
     u_coarse = Function(V_coarse)
     u_fine = Function(V_fine)
-    x, y = SpatialCoordinate(V_coarse.mesh())
-    u_coarse.interpolate(x)
+    xc, yc = SpatialCoordinate(V_coarse.mesh())
+    xf, yf = SpatialCoordinate(V_fine.mesh())
 
+
+    if operator == "prolong":
+        u_coarse.interpolate(xc)
+        assert errornorm(xc, u_coarse) <= 1e-12
+
+        atm.prolong(u_coarse, u_fine, amh)
+        assert errornorm(xf, u_fine) <= 1e-12
+    
+    if operator == "inject":
+        u_fine.interpolate(xf)
+        assert errornorm(xf, u_fine) <= 1e-12
+
+        atm.inject(u_fine, u_coarse, amh)
+        assert errornorm(xc, u_coarse) <= 1e-12
+
+def test_restrict_DG0(amh, atm):
+    V_coarse = FunctionSpace(amh[0], "DG", 0)
+    V_fine = FunctionSpace(amh[-1], "DG", 0)
+    u_coarse = Function(V_coarse)
+    u_fine = Function(V_fine)
+    xc, yc = SpatialCoordinate(V_coarse.mesh())
+    xf, yf = SpatialCoordinate(V_fine.mesh())
+
+    u_coarse.interpolate(xc)
     atm.prolong(u_coarse, u_fine, amh)
 
-    x, y = SpatialCoordinate(V_fine.mesh())
-    assert errornorm(x, u_fine) <= 1e-12
+    rf = Cofunction(V_fine.dual()).assign(1)
+    rc = Cofunction(V_coarse.dual())
+    atm.restrict(rf, rc, amh)
+    
+    print(assemble(action(rc, u_coarse)) - assemble(action(rf, u_fine)))
+    assert assemble(action(rc, u_coarse)) == assemble(action(rf, u_fine))
+
+
+
+
+

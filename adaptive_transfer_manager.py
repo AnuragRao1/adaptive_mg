@@ -31,7 +31,7 @@ class AdaptiveTransferManager(TransferManager):
         super().__init__(native_transfers=native_transfers, use_averaging=use_averaging)
         self.tm = TransferManager()
 
-    def generic_transfer(self, source, target, transfer_op, amh):
+    def generic_transfer(self, source, target, transfer_op, amh, V=None):
         # determine which meshes to iterate over
         for l, mesh in enumerate(amh.meshes):
             if source.function_space().mesh() == mesh:
@@ -44,32 +44,39 @@ class AdaptiveTransferManager(TransferManager):
         if target_level < source_level: order = -1
 
         curr_source = source
+        if isinstance(curr_source, Cofunction): print(curr_source.dat.data[:])
         if source_level == target_level: 
             target.assign(source)
             return
 
         for level in range(source_level, target_level, order):
             if level  + order == target_level:
-                target_v = target
+                curr_target = target
             else:
                 target_mesh = amh.meshes[level + order]
                 curr_space = curr_source.function_space()
                 target_space = curr_space.reconstruct(mesh=target_mesh)
-                target_v = Function(target_space)
+                if isinstance(curr_source, Function):
+                    curr_target = Function(target_space)
+                if isinstance(curr_source, Cofunction):
+                    curr_target = Cofunction(target_space)
 
             if order == 1:
                 source_function_splits = amh.split_function(curr_source, child=False)
-                target_function_splits = amh.split_function(target_v, child=True)
+                target_function_splits = amh.split_function(curr_target, child=True)
             else:
-                source_function_splits = amh.split_function(curr_source, child=True)
-                target_function_splits = amh.split_function(target_v, child=False)
+                source_function_splits = amh.split_function(curr_source, child=True, primal=V)
+                target_function_splits = amh.split_function(curr_target, child=False, primal=V)
 
             for split_label, _ in source_function_splits.items():
                 transfer_op(source_function_splits[split_label], target_function_splits[split_label]) 
-
-
-            amh.recombine(target_function_splits, target_v, child=order+1)
-            curr_source = target_v
+            
+            for t, val in target_function_splits.items():
+                if isinstance(val, Cofunction):
+                    print(t, val.dat.data.shape, val.dat.data[:])
+            amh.recombine(target_function_splits, curr_target, child=order+1, primal=V)
+            if isinstance(curr_target, Cofunction): print(curr_target.dat.data[:])
+            curr_source = curr_target
             
             print(f"Level {level} finished")
 
@@ -80,5 +87,5 @@ class AdaptiveTransferManager(TransferManager):
     def inject(self, uf, uc, amh):
         self.generic_transfer(uf, uc, transfer_op=self.tm.inject, amh=amh)
 
-    def restrict(self, source, target, amh):
-        self.generic_transfer(source, target, transfer_op=self.tm.restrict, amh=amh)
+    def restrict(self, source, target, amh, V=None):
+        self.generic_transfer(source, target, transfer_op=self.tm.restrict, amh=amh, V=V)
