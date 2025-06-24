@@ -110,7 +110,7 @@ class AdaptiveMeshHierarchy(HierarchyBase):
         mesh = Mesh(ngmesh)
         self.add_mesh(mesh)
     
-    def split_function(self, u, child=True, primal=None):
+    def split_function(self, u, child=True):
         V = u.function_space()
         full_mesh = V.mesh()
         _, level = get_level(full_mesh)
@@ -125,18 +125,12 @@ class AdaptiveMeshHierarchy(HierarchyBase):
             if isinstance(u, Function):
                 split_functions[i] = Function(V_split, name=str(i)).interpolate(u)
             elif isinstance(u, Cofunction):
-                primal = primal.reconstruct(mesh=full_mesh)
-                split_functions[i] = cofun_interpolate(u, Cofunction(V_split, name=str(i)), primal=primal)
-                # if child:
-                #     split_label = int(str(i)*2)
-                #     split_functions[i] = Cofunction(V_split, name=str(i)).interpolate(u, subset=full_mesh.cell_subset(split_label))
-                # else:
-                #     split_functions[i] = Cofunction(V_split, name=str(i)).interpolate(u, subset=full_mesh.cell_subset(i))
-
+                split_functions[i] = cofun_interpolate(u, Cofunction(V_split, name=str(i)))
+            
         return split_functions
     
 
-    def recombine(self, split_funcs, f, child=True, primal=None):      
+    def recombine(self, split_funcs, f, child=True):      
         V = f.function_space()  
         mesh_label = split_funcs[[*split_funcs][0]].function_space().mesh().submesh_parent
         V_label = V.reconstruct(mesh=mesh_label)
@@ -156,9 +150,9 @@ class AdaptiveMeshHierarchy(HierarchyBase):
             if isinstance(f_label, Cofunction):
                 if child:
                     split_label = int(str(split_label)*2)
-                    f_label = cofun_interpolate(val, f_label, primal=primal.reconstruct(mesh=val.function_space().mesh()), subset=mesh_label.cell_subset(split_label))
+                    f_label = cofun_interpolate(val, f_label, subset=mesh_label.cell_subset(split_label))
                 else: 
-                    f_label = cofun_interpolate(val, f_label, primal=primal.reconstruct(mesh=val.function_space().mesh()), subset=mesh_label.cell_subset(split_label))
+                    f_label = cofun_interpolate(val, f_label, subset=mesh_label.cell_subset(split_label))
         return f
 
 
@@ -241,13 +235,12 @@ def full_to_sub(mesh, submesh):
     
     return lambda x: u1.dat.data[x].astype(int)
 
-def cofun_as_function(c, primal):
-    return Function(primal, val=c.dat)
+def cofun_as_function(c):
+    return Function(c.function_space().dual(), val=c.dat)
 
-def cofun_interpolate(rsource, rtarget, primal, subset=None):
-    usource = cofun_as_function(rsource, primal)
-    target_primal = primal.reconstruct(mesh=rtarget.function_space().mesh())
-    utarget = cofun_as_function(rtarget, target_primal)
+def cofun_interpolate(rsource, rtarget, subset=None):
+    usource = cofun_as_function(rsource)
+    utarget = cofun_as_function(rtarget)
     utarget.interpolate(usource, subset=subset)
     return rtarget
 
@@ -418,7 +411,7 @@ if __name__ == "__main__":
 
     rf = Cofunction(Vfine.dual()).assign(1)
     rc = Cofunction(Vcoarse.dual())
-    atm.restrict(rf, rc, amh, Vfine)
+    atm.restrict(rf, rc, amh)
     
     print(assemble(action(rc, u)) - assemble(action(rf, v)))
     assert assemble(action(rc, u)) == assemble(action(rf, v))
