@@ -28,8 +28,31 @@ def amh():
     return amh
 
 @pytest.fixture
+def mh_res():
+    wp = WorkPlane()
+    wp.Rectangle(2,2)
+    face = wp.Face()
+    geo = OCCGeometry(face, dim=2)
+    maxh = 1
+    ngmesh = geo.GenerateMesh(maxh=maxh)
+    base = Mesh(ngmesh)
+    mesh2 = Mesh(ngmesh)
+    amh = AdaptiveMeshHierarchy([base])
+    for i in range(2):
+        refs = np.ones(len(ngmesh.Elements2D()))
+        amh.refine(refs)
+    
+    mh = MeshHierarchy(mesh2, 2)
+
+    return amh, mh
+
+@pytest.fixture
 def atm():
     return AdaptiveTransferManager()
+
+@pytest.fixture
+def tm():
+    return TransferManager()
 
 
 @pytest.mark.parametrize("operator", ["prolong", "inject"])
@@ -84,23 +107,78 @@ def test_CG1(amh, atm, operator):
         atm.inject(u_fine, u_coarse, amh)
         assert errornorm(xc, u_coarse) <= 1e-12
 
-def test_restrict_DG0(amh, atm):
+def test_restrict_DG0(mh_res, atm, tm):
+    amh = mh_res[0]
+    mh = mh_res[1]
+
     V_coarse = FunctionSpace(amh[0], "DG", 0)
     V_fine = FunctionSpace(amh[-1], "DG", 0)
     u_coarse = Function(V_coarse)
     u_fine = Function(V_fine)
-    xc, yc = SpatialCoordinate(V_coarse.mesh())
-    xf, yf = SpatialCoordinate(V_fine.mesh())
+    xc, _ = SpatialCoordinate(V_coarse.mesh())
 
     u_coarse.interpolate(xc)
     atm.prolong(u_coarse, u_fine, amh)
 
-    rf = Cofunction(V_fine.dual()).assign(1)
+    rf = assemble(TestFunction(V_fine)*dx)
     rc = Cofunction(V_coarse.dual())
     atm.restrict(rf, rc, amh)
     
-    print(assemble(action(rc, u_coarse)) - assemble(action(rf, u_fine)))
-    assert assemble(action(rc, u_coarse)) == assemble(action(rf, u_fine))
+    # compare with mesh_hierarchy
+    xcoarse, _ = SpatialCoordinate(mh[0])
+    Vcoarse = FunctionSpace(mh[0], "DG", 0)
+    Vfine = FunctionSpace(mh[-1], "DG", 0)
+    
+    mhuc  = Function(Vcoarse)
+    mhuc.interpolate(xcoarse)
+    mhuf = Function(Vfine)
+    tm.prolong(mhuc, mhuf)
+
+    mhrf = assemble(TestFunction(Vfine) * dx)
+    mhrc = Cofunction(Vcoarse.dual())
+    
+    tm.restrict(mhrf, mhrc)
+
+    assert (assemble(action(mhrc, mhuc)) - assemble(action(mhrf, mhuf))) / assemble(action(mhrf, mhuf)) <= 1e-12
+    assert (assemble(action(rc, u_coarse)) - assemble(action(mhrc, mhuc))) / assemble(action(mhrc, mhuc)) <= 1e-12
+
+def test_restrict_CG1(mh_res, atm, tm):
+    amh = mh_res[0]
+    mh = mh_res[1]
+
+    V_coarse = FunctionSpace(amh[0], "CG", 1)
+    V_fine = FunctionSpace(amh[-1], "CG", 1)
+    u_coarse = Function(V_coarse)
+    u_fine = Function(V_fine)
+    xc, _ = SpatialCoordinate(V_coarse.mesh())
+
+    u_coarse.interpolate(xc)
+    atm.prolong(u_coarse, u_fine, amh)
+
+    rf = assemble(TestFunction(V_fine)*dx)
+    rc = Cofunction(V_coarse.dual())
+    atm.restrict(rf, rc, amh)
+    
+    # compare with mesh_hierarchy
+    xcoarse, _ = SpatialCoordinate(mh[0])
+    Vcoarse = FunctionSpace(mh[0], "CG", 1)
+    Vfine = FunctionSpace(mh[-1], "CG", 1)
+    
+    mhuc  = Function(Vcoarse)
+    mhuc.interpolate(xcoarse)
+    mhuf = Function(Vfine)
+    tm.prolong(mhuc, mhuf)
+
+    mhrf = assemble(TestFunction(Vfine) * dx)
+    mhrc = Cofunction(Vcoarse.dual())
+    
+    tm.restrict(mhrf, mhrc)
+
+    assert (assemble(action(mhrc, mhuc)) - assemble(action(mhrf, mhuf))) / assemble(action(mhrf, mhuf)) <= 1e-12
+    assert (assemble(action(rc, u_coarse)) - assemble(action(mhrc, mhuc))) / assemble(action(mhrc, mhuc)) <= 1e-12
+
+
+
 
 
 

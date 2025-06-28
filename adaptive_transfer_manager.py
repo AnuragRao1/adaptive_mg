@@ -68,12 +68,9 @@ class AdaptiveTransferManager(TransferManager):
                 target_function_splits = amh.split_function(curr_target, child=False)
 
             for split_label, _ in source_function_splits.items():
+                print(split_label)
                 transfer_op(source_function_splits[split_label], target_function_splits[split_label]) 
-
-            for i, val in target_function_splits.items():
-                if isinstance(val, Cofunction):
-                    print(i, val.dat.data[:])
-
+    
             amh.recombine(target_function_splits, curr_target, child=order+1)
             curr_source = curr_target
             

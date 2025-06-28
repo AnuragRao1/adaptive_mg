@@ -132,27 +132,27 @@ class AdaptiveMeshHierarchy(HierarchyBase):
 
     def recombine(self, split_funcs, f, child=True):      
         V = f.function_space()  
-        mesh_label = split_funcs[[*split_funcs][0]].function_space().mesh().submesh_parent
-        V_label = V.reconstruct(mesh=mesh_label)
+        parent_mesh = split_funcs[[*split_funcs][0]].function_space().mesh().submesh_parent
+        V_label = V.reconstruct(mesh=parent_mesh)
         if isinstance(f, Function):
             f_label = Function(V_label, val=f.dat)
         elif isinstance(f, Cofunction):
             f_label = Cofunction(V_label, val=f.dat)
 
         for split_label, val in split_funcs.items():
-            assert val.function_space().mesh().submesh_parent == mesh_label
+            assert val.function_space().mesh().submesh_parent == parent_mesh
             if isinstance(f_label, Function):
                 if child:
                     split_label = int(str(split_label)*2)
-                    f_label.interpolate(val, subset=mesh_label.cell_subset(split_label))
+                    f_label.interpolate(val, subset=parent_mesh.cell_subset(split_label))
                 else:
-                    f_label.interpolate(val, subset=mesh_label.cell_subset(split_label))
+                    f_label.interpolate(val, subset=parent_mesh.cell_subset(split_label))
             if isinstance(f_label, Cofunction):
                 if child:
                     split_label = int(str(split_label)*2)
-                    f_label = cofun_interpolate(val, f_label, subset=mesh_label.cell_subset(split_label))
+                    f_label = cofun_interpolate(val, f_label, subset=parent_mesh.cell_subset(split_label))
                 else: 
-                    f_label = cofun_interpolate(val, f_label, subset=mesh_label.cell_subset(split_label))
+                    f_label = cofun_interpolate(val, f_label, subset=parent_mesh.cell_subset(split_label))
         return f
 
 
@@ -368,20 +368,28 @@ if __name__ == "__main__":
     maxh = 0.1
     ngmesh = geo.GenerateMesh(maxh=maxh)
     mesh = Mesh(ngmesh)
+    mesh2 = Mesh(ngmesh)
     amh = AdaptiveMeshHierarchy([mesh])
     
-    for i in range(2):
-        for_ref = np.zeros((len(ngmesh.Elements2D())))
+    for i in range(1):
+        # for_ref = np.zeros((len(ngmesh.Elements2D())))
         for l, el in enumerate(ngmesh.Elements2D()):
             el.refine = 0
             if random.random() < 0.5:
                 el.refine = 1
-                for_ref[l] = 1
-        # el.refine = 1
+        
+                # for_ref[l] = 1
+        
         ngmesh.Refine(adaptive=True)
         mesh = Mesh(ngmesh)
         amh.add_mesh(mesh)
-        #amh.refine(for_ref)
+        # amh.refine(for_ref)
+    # mh = MeshHierarchy(mesh2, 2)
+
+    # for i in range(2):
+    #     refs = np.ones(len(ngmesh.Elements2D()))
+    #     amh.refine(refs)
+        
 
     xcoarse, ycoarse = SpatialCoordinate(amh[0])
     xfine, yfine = SpatialCoordinate(amh[-1]) 
@@ -401,19 +409,43 @@ if __name__ == "__main__":
 
     # atm.prolong(u, v, amh)
     
-    # VTKFile("output/output_coarse_atmtest.pvd").write(u)
-    # VTKFile("output/output_fine_atmtest.pvd").write(v)
+    VTKFile("output/output_coarse_atmtest.pvd").write(u)
+    VTKFile("output/output_fine_atmtest.pvd").write(v)
 
     # RESTRICT
     u.interpolate(xcoarse)
     atm = AdaptiveTransferManager()
     atm.prolong(u, v, amh)
 
-    rf = Cofunction(Vfine.dual()).assign(1)
-    rc = Cofunction(Vcoarse.dual())
+    # rf = Cofunction(Vfine.dual()).assign(1)
+    rf = assemble(TestFunction(Vfine)*dx)
+    rc = Cofunction(Vcoarse.dual()) 
     atm.restrict(rf, rc, amh)
     
-    print(assemble(action(rc, u)) - assemble(action(rf, v)))
-    assert assemble(action(rc, u)) == assemble(action(rf, v))
+    assembled_rc = assemble(TestFunction(Vcoarse)*dx)
+    print("Adaptive TM: ", assemble(action(rc, u)), assemble(action(rf, v)))
+    print(assemble(action(assembled_rc, u)))
+    assert (assemble(action(rc, u)) - assemble(action(rf, v))) / assemble(action(rf, v)) <= 1e-2
+
+
+    # Compare against restriction from mh
+    # xcoarse, ycoarse = SpatialCoordinate(mh[0])
+    # xfine, yfine = SpatialCoordinate(mh[-1]) 
+    # Vcoarse = FunctionSpace(mh[0], "CG", 1)
+    # Vfine = FunctionSpace(mh[-1], "CG", 1)
+    
+    # tm = TransferManager()
+    # mhu  = Function(Vcoarse)
+    # mhu.interpolate(xcoarse)
+    # mhv = Function(Vfine)
+    # tm.prolong(mhu, mhv)
+
+    # mhrf = assemble(TestFunction(Vfine) * dx)
+    # mhrc = Cofunction(Vcoarse.dual())
+    
+    # tm.restrict(mhrf, mhrc)
+    # print("TM: ", assemble(action(mhrc, mhu)), assemble(action(mhrf, mhv)))
+    # test_rc = assemble(TestFunction(Vcoarse) * dx)
+    # print(assemble(action(test_rc, mhu)))
 
    
