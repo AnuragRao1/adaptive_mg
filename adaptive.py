@@ -75,8 +75,8 @@ class AdaptiveMeshHierarchy(HierarchyBase):
         c2f_adjusted = {j: np.zeros((n,j)) for n,j in zip(n,[1,2,3,4]) if n != 0}
         f2c_adjusted = {j: np.zeros((n * j, 1)) for n,j in zip(n,[1,2,3,4]) if n != 0}
 
-        coarse_full_to_sub_map = {i: full_to_sub(coarse_mesh, c_subm[i]) for i in c_subm}
-        fine_full_to_sub_map = {j: full_to_sub(mesh, f_subm[j]) for j in f_subm}
+        coarse_full_to_sub_map = {i: full_to_sub(coarse_mesh, c_subm[i], i) for i in c_subm}
+        fine_full_to_sub_map = {j: full_to_sub(mesh, f_subm[j], int(str(j)*2)) for j in f_subm}
     
         for i in range(len(c2f)):
             n = len(c2f[i])
@@ -126,12 +126,27 @@ class AdaptiveMeshHierarchy(HierarchyBase):
                 split_functions[i] = Function(V_split, name=str(i)).interpolate(u)
             elif isinstance(u, Cofunction):
                 split_functions[i] = cofun_interpolate(u, Cofunction(V_split, name=str(i)))
-            
+                # print(f"splits {i}", split_functions[i].dat.data)
+                # if i == 4 and split_functions[i].dat.data.shape[0] == 6:
+                #     split_functions[i].dat.data[[0,1,5]] *= 0.5
+                # if i == 2 and split_functions[i].dat.data.shape[0] == 4:
+                #     split_functions[i].dat.data[[0,2,3]] *= 0.5
+
         return split_functions
     
+    def use_weight(self, u, child):
+        w = Function(u.function_space())
+        w.assign(1)
+        splits = self.split_function(w, child)
+
+        self.recombine(splits, w, child)
+        # print("weights:", w.dat.data)
+        return w
+
 
     def recombine(self, split_funcs, f, child=True):      
         V = f.function_space()  
+        f.zero()
         parent_mesh = split_funcs[[*split_funcs][0]].function_space().mesh().submesh_parent
         V_label = V.reconstruct(mesh=parent_mesh)
         if isinstance(f, Function):
@@ -224,14 +239,14 @@ def split_to_submesh(mesh, coarse_mesh, c2f, f2c):
     
     return v, z, w, coarse_intersect, v_fine, z_fine, w_fine, fine_intersect, num_children
  
-def full_to_sub(mesh, submesh):
+def full_to_sub(mesh, submesh, label):
     # returns the submesh element number associated with the mesh number
     V1=FunctionSpace(mesh, "DG", 0)
     V2=FunctionSpace(submesh,  "DG", 0)
     u1=Function(V1)
     u2=Function(V2)
     u2.dat.data[:] = np.arange(len(u2.dat.data))
-    u1.interpolate(u2)
+    u1.interpolate(u2, subset=mesh.cell_subset(label))
     
     return lambda x: u1.dat.data[x].astype(int)
 
@@ -239,9 +254,13 @@ def cofun_as_function(c):
     return Function(c.function_space().dual(), val=c.dat)
 
 def cofun_interpolate(rsource, rtarget, subset=None):
+    # print("rtarget in", rtarget.dat.data)
     usource = cofun_as_function(rsource)
     utarget = cofun_as_function(rtarget)
-    utarget.interpolate(usource, subset=subset)
+    temp = Function(utarget.function_space())
+    temp.interpolate(usource, subset=subset)
+    utarget.assign(utarget + temp)
+    # print("rtarget out", rtarget.dat.data)
     return rtarget
 
 
@@ -371,15 +390,14 @@ if __name__ == "__main__":
     mesh2 = Mesh(ngmesh)
     amh = AdaptiveMeshHierarchy([mesh])
     
-    for i in range(1):
+    for i in range(2):
         # for_ref = np.zeros((len(ngmesh.Elements2D())))
         for l, el in enumerate(ngmesh.Elements2D()):
             el.refine = 0
-            if random.random() < 0.5:
+            if random.random() < 0.25:
                 el.refine = 1
         
                 # for_ref[l] = 1
-        
         ngmesh.Refine(adaptive=True)
         mesh = Mesh(ngmesh)
         amh.add_mesh(mesh)
@@ -423,6 +441,9 @@ if __name__ == "__main__":
     atm.restrict(rf, rc, amh)
     
     assembled_rc = assemble(TestFunction(Vcoarse)*dx)
+    print("ASSEMBLED RC: ", assembled_rc.dat.data)
+    print("RC: ", rc.dat.data)
+    print("dif: ", assembled_rc.dat.data - rc.dat.data)
     print("Adaptive TM: ", assemble(action(rc, u)), assemble(action(rf, v)))
     print(assemble(action(assembled_rc, u)))
     assert (assemble(action(rc, u)) - assemble(action(rf, v))) / assemble(action(rf, v)) <= 1e-2

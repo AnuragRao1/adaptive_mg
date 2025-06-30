@@ -107,7 +107,7 @@ def test_CG1(amh, atm, operator):
         atm.inject(u_fine, u_coarse, amh)
         assert errornorm(xc, u_coarse) <= 1e-12
 
-def test_restrict_DG0(mh_res, atm, tm):
+def test_restrict_uniform(mh_res, atm, tm):
     amh = mh_res[0]
     mh = mh_res[1]
 
@@ -142,10 +142,7 @@ def test_restrict_DG0(mh_res, atm, tm):
     assert (assemble(action(mhrc, mhuc)) - assemble(action(mhrf, mhuf))) / assemble(action(mhrf, mhuf)) <= 1e-12
     assert (assemble(action(rc, u_coarse)) - assemble(action(mhrc, mhuc))) / assemble(action(mhrc, mhuc)) <= 1e-12
 
-def test_restrict_CG1(mh_res, atm, tm):
-    amh = mh_res[0]
-    mh = mh_res[1]
-
+def test_restrict_CG1(amh, atm):
     V_coarse = FunctionSpace(amh[0], "CG", 1)
     V_fine = FunctionSpace(amh[-1], "CG", 1)
     u_coarse = Function(V_coarse)
@@ -156,31 +153,23 @@ def test_restrict_CG1(mh_res, atm, tm):
     atm.prolong(u_coarse, u_fine, amh)
 
     rf = assemble(TestFunction(V_fine)*dx)
-    rc = Cofunction(V_coarse.dual())
+    rc = Cofunction(V_coarse.dual()) 
     atm.restrict(rf, rc, amh)
     
-    # compare with mesh_hierarchy
-    xcoarse, _ = SpatialCoordinate(mh[0])
-    Vcoarse = FunctionSpace(mh[0], "CG", 1)
-    Vfine = FunctionSpace(mh[-1], "CG", 1)
+    assert np.allclose(assemble(action(rc, u_coarse)), assemble(action(rf, u_fine)), rtol=1e-12)
+
+def test_restrict_DG0(amh, atm):
+    V_coarse = FunctionSpace(amh[0], "DG", 0)
+    V_fine = FunctionSpace(amh[-1], "DG", 0)
+    u_coarse = Function(V_coarse)
+    u_fine = Function(V_fine)
+    xc, _ = SpatialCoordinate(V_coarse.mesh())
+
+    u_coarse.interpolate(xc)
+    atm.prolong(u_coarse, u_fine, amh)
+
+    rf = assemble(TestFunction(V_fine)*dx)
+    rc = Cofunction(V_coarse.dual()) 
+    atm.restrict(rf, rc, amh)
     
-    mhuc  = Function(Vcoarse)
-    mhuc.interpolate(xcoarse)
-    mhuf = Function(Vfine)
-    tm.prolong(mhuc, mhuf)
-
-    mhrf = assemble(TestFunction(Vfine) * dx)
-    mhrc = Cofunction(Vcoarse.dual())
-    
-    tm.restrict(mhrf, mhrc)
-
-    assert (assemble(action(mhrc, mhuc)) - assemble(action(mhrf, mhuf))) / assemble(action(mhrf, mhuf)) <= 1e-12
-    assert (assemble(action(rc, u_coarse)) - assemble(action(mhrc, mhuc))) / assemble(action(mhrc, mhuc)) <= 1e-12
-
-
-
-
-
-
-
-
+    assert np.allclose(assemble(action(rc, u_coarse)), assemble(action(rf, u_fine)), rtol=1e-12)

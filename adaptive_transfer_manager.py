@@ -60,6 +60,13 @@ class AdaptiveTransferManager(TransferManager):
                 if isinstance(curr_source, Cofunction):
                     curr_target = Cofunction(target_space)
 
+            if transfer_op == self.tm.restrict:
+                w = amh.use_weight(curr_source, child=True)
+                wsource = Function(curr_source.function_space())
+                with curr_source.dat.vec as svec, w.dat.vec as wvec, wsource.dat.vec as wsvec:
+                    wsvec.pointwiseDivide(svec, wvec)
+                curr_source = wsource
+
             if order == 1:
                 source_function_splits = amh.split_function(curr_source, child=False)
                 target_function_splits = amh.split_function(curr_target, child=True)
@@ -68,13 +75,12 @@ class AdaptiveTransferManager(TransferManager):
                 target_function_splits = amh.split_function(curr_target, child=False)
 
             for split_label, _ in source_function_splits.items():
-                print(split_label)
                 transfer_op(source_function_splits[split_label], target_function_splits[split_label]) 
-    
+                
+
             amh.recombine(target_function_splits, curr_target, child=order+1)
             curr_source = curr_target
             
-            print(f"Level {level} finished")
 
 
     def prolong(self, uc, uf, amh):
