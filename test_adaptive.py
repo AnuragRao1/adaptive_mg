@@ -91,14 +91,14 @@ def test_DG0_2D(amh, atm, operator):
         u_coarse.interpolate(stepc)
         assert errornorm(stepc, u_coarse) <= 1e-12
 
-        atm.prolong(u_coarse, u_fine, amh)
+        atm.prolong(u_coarse, u_fine)
         assert errornorm(stepf, u_fine) <= 1e-12
     
     if operator == "inject":
         u_fine.interpolate(stepf)
         assert errornorm(stepf, u_fine) <= 1e-12
 
-        atm.inject(u_fine, u_coarse, amh)
+        atm.inject(u_fine, u_coarse)
         assert errornorm(stepc, u_coarse) <= 1e-12
 
 
@@ -117,14 +117,14 @@ def test_DG0_3D(amh3D, atm, operator):
         u_coarse.interpolate(stepc)
         assert errornorm(stepc, u_coarse) <= 1e-12
 
-        atm.prolong(u_coarse, u_fine, amh3D)
+        atm.prolong(u_coarse, u_fine)
         assert errornorm(stepf, u_fine) <= 1e-12
     
     if operator == "inject":
         u_fine.interpolate(stepf)
         assert errornorm(stepf, u_fine) <= 1e-12
 
-        atm.inject(u_fine, u_coarse, amh3D)
+        atm.inject(u_fine, u_coarse)
         assert errornorm(stepc, u_coarse) <= 1e-12
 
 
@@ -143,14 +143,14 @@ def test_CG1_2D(amh, atm, operator):
         u_coarse.interpolate(xc)
         assert errornorm(xc, u_coarse) <= 1e-12
 
-        atm.prolong(u_coarse, u_fine, amh)
+        atm.prolong(u_coarse, u_fine)
         assert errornorm(xf, u_fine) <= 1e-12
     
     if operator == "inject":
         u_fine.interpolate(xf)
         assert errornorm(xf, u_fine) <= 1e-12
 
-        atm.inject(u_fine, u_coarse, amh)
+        atm.inject(u_fine, u_coarse)
         assert errornorm(xc, u_coarse) <= 1e-12
 
 @pytest.mark.parametrize("operator", ["prolong", "inject"])
@@ -168,14 +168,14 @@ def test_CG1_3D(amh3D, atm, operator):
         u_coarse.interpolate(xc)
         assert errornorm(xc, u_coarse) <= 1e-12
 
-        atm.prolong(u_coarse, u_fine, amh3D)
+        atm.prolong(u_coarse, u_fine)
         assert errornorm(xf, u_fine) <= 1e-12
     
     if operator == "inject":
         u_fine.interpolate(xf)
         assert errornorm(xf, u_fine) <= 1e-12
 
-        atm.inject(u_fine, u_coarse, amh3D)
+        atm.inject(u_fine, u_coarse)
         assert errornorm(xc, u_coarse) <= 1e-12
 
 def test_restrict_consistency(mh_res, atm, tm):
@@ -189,11 +189,11 @@ def test_restrict_consistency(mh_res, atm, tm):
     xc, _ = SpatialCoordinate(V_coarse.mesh())
 
     u_coarse.interpolate(xc)
-    atm.prolong(u_coarse, u_fine, amh)
+    atm.prolong(u_coarse, u_fine)
 
     rf = assemble(TestFunction(V_fine)*dx)
     rc = Cofunction(V_coarse.dual())
-    atm.restrict(rf, rc, amh)
+    atm.restrict(rf, rc)
     
     # compare with mesh_hierarchy
     xcoarse, _ = SpatialCoordinate(mh[0])
@@ -221,11 +221,11 @@ def test_restrict_CG1_2D(amh, atm):
     xc, _ = SpatialCoordinate(V_coarse.mesh())
 
     u_coarse.interpolate(xc)
-    atm.prolong(u_coarse, u_fine, amh)
+    atm.prolong(u_coarse, u_fine)
 
     rf = assemble(TestFunction(V_fine)*dx)
     rc = Cofunction(V_coarse.dual()) 
-    atm.restrict(rf, rc, amh)
+    atm.restrict(rf, rc)
     
     assert np.allclose(assemble(action(rc, u_coarse)), assemble(action(rf, u_fine)), rtol=1e-12)
 
@@ -237,11 +237,11 @@ def test_restrict_CG1_3D(amh3D, atm):
     xc, _, _ = SpatialCoordinate(V_coarse.mesh())
 
     u_coarse.interpolate(xc)
-    atm.prolong(u_coarse, u_fine, amh3D)
+    atm.prolong(u_coarse, u_fine)
 
     rf = assemble(TestFunction(V_fine)*dx)
     rc = Cofunction(V_coarse.dual()) 
-    atm.restrict(rf, rc, amh3D)
+    atm.restrict(rf, rc)
     
     assert np.allclose(assemble(action(rc, u_coarse)), assemble(action(rf, u_fine)), rtol=1e-12)
 
@@ -253,11 +253,11 @@ def test_restrict_DG0_2D(amh, atm):
     xc, _ = SpatialCoordinate(V_coarse.mesh())
 
     u_coarse.interpolate(xc)
-    atm.prolong(u_coarse, u_fine, amh)
+    atm.prolong(u_coarse, u_fine)
 
     rf = assemble(TestFunction(V_fine)*dx)
     rc = Cofunction(V_coarse.dual()) 
-    atm.restrict(rf, rc, amh)
+    atm.restrict(rf, rc)
     
     assert np.allclose(assemble(action(rc, u_coarse)), assemble(action(rf, u_fine)), rtol=1e-12)
 
@@ -269,11 +269,11 @@ def test_restrict_DG0_3D(amh3D, atm):
     xc, _, _ = SpatialCoordinate(V_coarse.mesh())
 
     u_coarse.interpolate(xc)
-    atm.prolong(u_coarse, u_fine, amh3D)
+    atm.prolong(u_coarse, u_fine)
 
     rf = assemble(TestFunction(V_fine)*dx)
     rc = Cofunction(V_coarse.dual()) 
-    atm.restrict(rf, rc, amh3D)
+    atm.restrict(rf, rc)
     
     assert np.allclose(assemble(action(rc, u_coarse)), assemble(action(rf, u_fine)), rtol=1e-12)
 
