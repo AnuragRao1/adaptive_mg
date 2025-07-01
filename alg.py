@@ -4,6 +4,15 @@ from adaptive import AdaptiveMeshHierarchy
 from adaptive_transfer_manager import AdaptiveTransferManager
 import random
 import gc
+from firedrake.mg.ufl_utils import coarsen
+from firedrake.dmhooks import get_appctx
+from firedrake import dmhooks
+from firedrake.solving_utils import _SNESContext
+from firedrake.mg.utils import get_level
+
+
+
+
 
 
 def p_robust_alg(p=1, levels=2, s=0):
@@ -13,7 +22,7 @@ def p_robust_alg(p=1, levels=2, s=0):
     wp.Rectangle(2,2)
     face = wp.Face()
     geo = OCCGeometry(face, dim=2)
-    maxh = 2
+    maxh = 0.5
     ngmesh = geo.GenerateMesh(maxh=maxh)
     mesh = Mesh(ngmesh)
     amh = AdaptiveMeshHierarchy([mesh])
@@ -38,15 +47,31 @@ def p_robust_alg(p=1, levels=2, s=0):
 
     bc = DirichletBC(V_0, u_ex, "on_boundary")
     F =  inner(grad(u_0),grad(v)) * dx - inner(f_0, v) * dx
-    solve(F == 0, u_0, bc)
+    # solve(F == 0, u_0, bc)
+
+    
 
     # initialize quantities for mg loop
     V_J = V_0.reconstruct(mesh=amh[-1])
 
+
+
     f_j = [Function(V_0.reconstruct(mesh=amh[j]), name=f"f_{j}") for j in range(0, levels+1)]
     for f in f_j:
-        atm.prolong(f_0, f, amh)
+        atm.prolong(f_0, f)
     
+    
+    (x,y) = SpatialCoordinate(amh[-1])
+    u_ex = Function(V_J, name="u_0_real").interpolate(sin(2 * pi * x) * sin(2 * pi * y))
+    u = Function(V_J)
+    v = TestFunction(V_J)
+    bc = DirichletBC(V_J, Constant(0), "on_boundary")
+    F = inner(grad(u - u_ex), grad(v)) * dx
+    attempt_solve(F, u, bc, atm)
+    return
+
+
+
 
     rho_0_0 = Function(V_0, name=f"rho_0^{i}")
     rho_0_bc = DirichletBC(V_0, 0, "on_boundary")
@@ -108,6 +133,7 @@ def p_robust_alg(p=1, levels=2, s=0):
 
             print(f"PATCHES FOR LEVEL {j}: ", len(submeshes))
             for i, patch in enumerate(submeshes):
+                print(f"PATCH {i}")
                 V_a = V_0.reconstruct(mesh=patch)
                 v_patch = TestFunction(V_a)
 
@@ -177,44 +203,70 @@ def generate_submeshes(mesh):
     submeshes = [Submesh(mesh, mesh.topology_dm.getDimension(), i) for i in range((mesh.coordinates.dat.data.shape[0]))]
     return submeshes
 
-def attempt_solve(F, u, bcs):
+def attempt_solve(F, u, bcs, atm):
     solver_configs = [
+        # {
+        #     "snes_type": "newtonls",
+        #     "snes_max_it": 50,
+        #     "snes_rtol": 1e-8
+        # },
+        # {
+        #     "snes_type": "newtonls",
+        #     "snes_linesearch_type": "bt",
+        #     "snes_max_it": 100,
+        #     "snes_rtol": 1e-8
+        # },
+        # {
+        #     "snes_type": "newtontr",
+        #     "snes_max_it": 200,
+        #     "snes_rtol": 1e-8
+        # },
         {
-            "snes_type": "newtonls",
-            "snes_max_it": 50,
-            "snes_rtol": 1e-8
-        },
-        {
-            "snes_type": "newtonls",
-            "snes_linesearch_type": "bt",
-            "snes_max_it": 100,
-            "snes_rtol": 1e-8
-        },
-        {
-            "snes_type": "newtontr",
-            "snes_max_it": 200,
-            "snes_rtol": 1e-8
-        },
-        {
-            "snes_type": "newtonls",
-            "snes_max_it": 500,
-            "snes_rtol": 1e-6,
-            "snes_atol": 1e-6
+            "snes_type": "ksponly",
+            "ksp_max_it": 20,
+            "ksp_type": "cg", 
+            "ksp_monitor": None,
+            "snes_monitor": None,
+            "ksp_norm_type": "unpreconditioned",
+            "ksp_rtol": 1e-6,
+            "ksp_atol": 1e-6,
+            "pc_type": "mg",
+            "mg_levels_pc_type": "jacobi",
+            "mg_levels_ksp_type": "chebyshev",
+            "mg_levels_ksp_max_it": 2,
+            "mg_levels_ksp_richardson_scale": 1/3,
+            "mg_coarse_ksp_type": "preonly",
+            "mg_coarse_pc_type": "lu",
+            "mg_coarse_pc_factor_mat_solver_type": "mumps" 
         }
     ]
     
     for i, params in enumerate(solver_configs):
-        try:
-            solve(F == 0, u, bcs, solver_parameters=params)
-            return True
-        except Exception as e:
-            print(f"Attempt {i+1} failed: {e}")
-            continue
+
+        problem = NonlinearVariationalProblem(F, u, bcs)
+        dm = u.function_space().dm
+        old_appctx = get_appctx(dm)
+        mat_type = "aij"
+        appctx = _SNESContext(problem, mat_type, mat_type, old_appctx)
+        appctx.transfer_manager = atm
+        solver = NonlinearVariationalSolver(problem, solver_parameters=params)
+        solver.set_transfer_manager(atm)
+        with dmhooks.add_hooks(dm, solver, appctx=appctx, save=False):
+            coarsen(problem, coarsen)
+
+
+        
+        solver.solve()
+        print("SOLVED")
+        # solve(F == 0, u, bcs, solver_parameters=params)
+        return True
     
     return False
 
 
+
+
 if __name__ == "__main__":
-    (u, iterations, contraction_err, rel_err) = p_robust_alg()
-    print(contraction_err)
-    print(rel_err)
+    _ = p_robust_alg()
+    # print(contraction_err)
+    # print(rel_err)

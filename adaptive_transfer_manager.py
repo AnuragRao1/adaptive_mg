@@ -1,6 +1,8 @@
 from enum import IntEnum
 from firedrake import *
 from firedrake.mg.embedded import TransferManager
+from firedrake.mg.utils import get_level
+
 
 
 __all__ = ("AdaptiveTransferManager", )
@@ -25,8 +27,9 @@ class AdaptiveTransferManager(TransferManager):
         super().__init__(native_transfers=native_transfers, use_averaging=use_averaging)
         self.tm = TransferManager()
 
-    def generic_transfer(self, source, target, transfer_op, amh):
+    def generic_transfer(self, source, target, transfer_op):
         # determine which meshes to iterate over
+        amh, _ = get_level(source.function_space().mesh())
         for l, mesh in enumerate(amh.meshes):
             if source.function_space().mesh() == mesh:
                 source_level = l
@@ -75,11 +78,11 @@ class AdaptiveTransferManager(TransferManager):
             amh.recombine(target_function_splits, curr_target, child=order+1)
             curr_source = curr_target
 
-    def prolong(self, uc, uf, amh):
-        self.generic_transfer(uc, uf, transfer_op=self.tm.prolong, amh=amh)
+    def prolong(self, uc, uf):
+        self.generic_transfer(uc, uf, transfer_op=self.tm.prolong)
 
-    def inject(self, uf, uc, amh):
-        self.generic_transfer(uf, uc, transfer_op=self.tm.inject, amh=amh)
+    def inject(self, uf, uc):
+        self.generic_transfer(uf, uc, transfer_op=self.tm.inject)
 
-    def restrict(self, source, target, amh):
-        self.generic_transfer(source, target, transfer_op=self.tm.restrict, amh=amh)
+    def restrict(self, source, target):
+        self.generic_transfer(source, target, transfer_op=self.tm.restrict)

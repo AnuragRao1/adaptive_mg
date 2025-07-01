@@ -5,6 +5,8 @@ import firedrake
 from firedrake import *
 from adaptive_transfer_manager import AdaptiveTransferManager
 from adaptive import AdaptiveMeshHierarchy
+from firedrake.mg.utils import get_level
+
 
 # mesh = UnitSquareMesh(4, 4)
 # mh = MeshHierarchy(mesh, 2)
@@ -138,7 +140,9 @@ for i in range(2):
     mesh = Mesh(ngmesh)
     amh.add_mesh(mesh)
     # amh.refine(for_ref)
-# mh = MeshHierarchy(mesh2, 2)
+mh = MeshHierarchy(mesh2, 2)
+for mesh in mh.meshes:
+    print("LEVELS", get_level(mesh))
 
 # for i in range(2):
 #     refs = np.ones(len(ngmesh.Elements2D()))

@@ -5,6 +5,7 @@ from firedrake.mg import HierarchyBase
 from firedrake import *
 from fractions import Fraction
 from firedrake.mg.utils import set_level, get_level
+from collections import defaultdict
 
 class AdaptiveMeshHierarchy(HierarchyBase):
     def __init__(self, mesh, refinements_per_level=1, nested=True):
@@ -15,7 +16,7 @@ class AdaptiveMeshHierarchy(HierarchyBase):
         self.fine_to_coarse_cells = None
         self.refinements_per_level = refinements_per_level
         self.nested = nested
-        set_level(mesh[0], self, Fraction(1, 1))
+        set_level(mesh[0], self, 0)
 
         # Implementing setlevel might mess with the adjusted AdaptiveTransferManager
         
@@ -25,8 +26,8 @@ class AdaptiveMeshHierarchy(HierarchyBase):
         self.meshes += tuple(mesh)
         coarse_mesh = self.meshes[-2]
         level = len(self.meshes)
-        set_level(self.meshes[-1], self, level)
-        # self._shared_data_cache ???
+        set_level(self.meshes[-1], self, level - 1)
+        self._shared_data_cache = defaultdict(dict)
 
         if len(self.meshes) <= 2: 
             self.coarse_to_fine_cells = {}
@@ -95,7 +96,7 @@ class AdaptiveMeshHierarchy(HierarchyBase):
         _, level = get_level(full_mesh)
 
         ind = 1 if child else 0
-        hierarchy_dict = self.submesh_hierarchies[int(level)-1-ind]
+        hierarchy_dict = self.submesh_hierarchies[int(level)-ind]
 
         split_functions = {}
         for i in hierarchy_dict:
