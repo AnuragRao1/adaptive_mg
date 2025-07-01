@@ -1,12 +1,6 @@
-import firedrake
-import ufl
-import finat.ufl
-import weakref
 from enum import IntEnum
-from firedrake.petsc import PETSc
 from firedrake import *
-from firedrake.mg.embedded import TransferManager, get_embedding_element
-from firedrake.embedding import get_embedding_dg_element
+from firedrake.mg.embedded import TransferManager
 
 
 __all__ = ("AdaptiveTransferManager", )
@@ -80,8 +74,6 @@ class AdaptiveTransferManager(TransferManager):
 
             amh.recombine(target_function_splits, curr_target, child=order+1)
             curr_source = curr_target
-            
-
 
     def prolong(self, uc, uf, amh):
         self.generic_transfer(uc, uf, transfer_op=self.tm.prolong, amh=amh)

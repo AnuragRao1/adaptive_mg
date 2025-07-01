@@ -1,19 +1,10 @@
 from netgen.occ import *
-import pdb 
 import numpy as np
 
-import firedrake
-from firedrake.utils import cached_property
-from firedrake.cython import mgimpl as impl
 from firedrake.mg import HierarchyBase
 from firedrake import *
 from fractions import Fraction
-from adaptive_transfer_manager import AdaptiveTransferManager
 from firedrake.mg.utils import set_level, get_level
-
-
-""" Implementing Pablo's method here, we split our refined meshes into the unsplit and split submeshes, we have fixed sized arrays for both parts which resolves the transfer manager issues."""
-
 
 class AdaptiveMeshHierarchy(HierarchyBase):
     def __init__(self, mesh, refinements_per_level=1, nested=True):
@@ -28,11 +19,8 @@ class AdaptiveMeshHierarchy(HierarchyBase):
 
         # Implementing setlevel might mess with the adjusted AdaptiveTransferManager
         
-    def add_mesh(self, mesh, netgen_flags=True):
-        #check new mesh is fd mesh or netgen, if not reject
-        if (isinstance(netgen_flags, bool) and netgen_flags) and not hasattr(mesh, "netgen_mesh"):
-            raise RuntimeError("NO SUPPORT FOR OTHER MESH TYPES OR NEED TO INPUT NG MESH USING Mesh()")
-        
+    def add_mesh(self, mesh):
+      
         self._meshes += tuple(mesh)
         self.meshes += tuple(mesh)
         coarse_mesh = self.meshes[-2]
@@ -45,61 +33,51 @@ class AdaptiveMeshHierarchy(HierarchyBase):
             self.fine_to_coarse_cells = {}
             self.fine_to_coarse_cells[Fraction(0,1)] = None
 
-        if (isinstance(netgen_flags, bool) and netgen_flags) and hasattr(mesh, "netgen_mesh"):
-            # extract parent child relationships from netgen meshes,
-            num_parents = self.meshes[-2].num_cells()
-            (c2f, f2c) = get_c2f_f2c_fd(mesh, num_parents, coarse_mesh)
+        # extract parent child relationships from netgen meshes,
+        (c2f, f2c) = get_c2f_f2c_fd(mesh, coarse_mesh)
 
        
-        self.coarse_to_fine_cells[Fraction(len(self.meshes) - 2,1)] = c2f # for now fix refinements_per_level to be 1
+        self.coarse_to_fine_cells[Fraction(len(self.meshes) - 2,1)] = c2f 
         self.fine_to_coarse_cells[Fraction(len(self.meshes) - 1,1)] = np.array(f2c)
 
         # split both the fine and coarse meshes into the componenets that will be split, store those 
-        (v, z, w, coarse_intersect, v_fine, z_fine, w_fine, fine_intersect, num_children) = split_to_submesh(mesh, coarse_mesh, c2f, f2c)
-        coarse_mesh.mark_entities(coarse_intersect, 1)
-        coarse_mesh.mark_entities(v, 2)
-        coarse_mesh.mark_entities(z, 3)
-        coarse_mesh.mark_entities(w, 4)
-        coarse_mesh = RelabeledMesh(coarse_mesh, [coarse_intersect, v, z, w], [1, 2, 3, 4], name="Relabeled_coarse")
-        c_subm = {j: Submesh(coarse_mesh, coarse_mesh.topology_dm.getDimension(), j) for j in [1,2,3,4] if any(num_children == j)}
-       
-        mesh.mark_entities(fine_intersect, 11)
-        mesh.mark_entities(v_fine, 22)
-        mesh.mark_entities(z_fine, 33)
-        mesh.mark_entities(w_fine, 44)
-        mesh = RelabeledMesh(mesh, [fine_intersect, v_fine, z_fine, w_fine], [11, 22, 33, 44])
-        f_subm = {int(str(j)[0]): Submesh(mesh, mesh.topology_dm.getDimension(), j) for j in [11, 22, 33, 44] if any(num_children == int(str(j)[0]))}
-        
+        (coarse_splits, fine_splits, num_children) = split_to_submesh(mesh, coarse_mesh, c2f, f2c)
+        for i in range(1,17):
+            coarse_mesh.mark_entities(coarse_splits[i], i)
+            mesh.mark_entities(fine_splits[i], int(f"10{i}"))
+
+        coarse_mesh = RelabeledMesh(coarse_mesh, [coarse_splits[i] for i in range(1,17)], list(range(1,17)), name="Relabeled_coarse")
+        c_subm = {j: Submesh(coarse_mesh, coarse_mesh.topology_dm.getDimension(), j) for j in range(1,17) if any(num_children == j)}
+
+        mesh = RelabeledMesh(mesh, [fine_splits[i] for i in range(1,17)], list(range(1,17)))
+        f_subm = {int(str(j)[-2:]): Submesh(mesh, mesh.topology_dm.getDimension(), j) for j in [int("10" + str(i)) for i in range(1,17)] if any(num_children == int(str(j)[-2:]))}
+
         # update c2f and f2c for submeshes by mapping numberings on full mesh to numberings on coarse mesh
-        n = [len([el for el in c2f if len(el) == j]) for j in [1,2,3,4]] # number of parents for each category
-        c2f_adjusted = {j: np.zeros((n,j)) for n,j in zip(n,[1,2,3,4]) if n != 0}
-        f2c_adjusted = {j: np.zeros((n * j, 1)) for n,j in zip(n,[1,2,3,4]) if n != 0}
+        n = [len([el for el in c2f if len(el) == j]) for j in range(1,17)] 
+        c2f_adjusted = {j: np.zeros((n,j)) for n,j in zip(n,list(range(1,17))) if n != 0}
+        f2c_adjusted = {j: np.zeros((n * j, 1)) for n,j in zip(n,list(range(1,17))) if n != 0}
 
         coarse_full_to_sub_map = {i: full_to_sub(coarse_mesh, c_subm[i], i) for i in c_subm}
-        fine_full_to_sub_map = {j: full_to_sub(mesh, f_subm[j], int(str(j)*2)) for j in f_subm}
+        fine_full_to_sub_map = {j: full_to_sub(mesh, f_subm[j], int("10" + str(j))) for j in f_subm}
     
         for i in range(len(c2f)):
             n = len(c2f[i])
-            if 1 <= n <= 4:
+            if 1 <= n <= 16:
                 c2f_adjusted[n][coarse_full_to_sub_map[n](i)] = fine_full_to_sub_map[n](np.array(c2f[i]))
 
         for j in range(len(f2c)):
             n = int(num_children[f2c[j]].item())
-            if 1 <= n <= 4:
+            if 1 <= n <= 16:
                 f2c_adjusted[n][fine_full_to_sub_map[n](j), 0] = coarse_full_to_sub_map[n](f2c[j].item())
 
-        # HAD TO CHANGE THIS, the getlevel() function used in mg/utils.py checks for level of submesh hierarchy, since we only have two levels per submesh hierarchy it will only look for 0 and 1 for each pair
-        # What might happen if the submesh for when its the fine and coarse are the same???
-        # c2f_subm = [{Fraction(len(self.meshes) - 2, 1): c2f_n} for c2f_n in c2f_adjusted]
-        # f2c_subm = [{Fraction(len(self.meshes) - 1, 1): f2c_n} for f2c_n in f2c_adjusted]
         c2f_subm = {i: {Fraction(0, 1): c2f_adjusted[i].astype(int)} for i in c2f_adjusted}
         f2c_subm = {i: {Fraction(1, 1): f2c_adjusted[i]} for i in f2c_adjusted}
-
         
         hierarchy_dict = {i: HierarchyBase([c_subm[i], f_subm[i]], c2f_subm[i], f2c_subm[i], nested=True) for i in c_subm}
         self.submesh_hierarchies.append(hierarchy_dict)
 
     def refine(self, refinements):
+        # Input a list corresponding to which elements get refined
         ngmesh = self.meshes[-1].netgen_mesh
         for l, el in enumerate(ngmesh.Elements2D()):
             el.refine = 0
@@ -111,11 +89,11 @@ class AdaptiveMeshHierarchy(HierarchyBase):
         self.add_mesh(mesh)
     
     def split_function(self, u, child=True):
+        #Split function across submeshes
         V = u.function_space()
         full_mesh = V.mesh()
         _, level = get_level(full_mesh)
 
-        # to decide which submesh split to take
         ind = 1 if child else 0
         hierarchy_dict = self.submesh_hierarchies[int(level)-1-ind]
 
@@ -126,25 +104,22 @@ class AdaptiveMeshHierarchy(HierarchyBase):
                 split_functions[i] = Function(V_split, name=str(i)).interpolate(u)
             elif isinstance(u, Cofunction):
                 split_functions[i] = cofun_interpolate(u, Cofunction(V_split, name=str(i)))
-                # print(f"splits {i}", split_functions[i].dat.data)
-                # if i == 4 and split_functions[i].dat.data.shape[0] == 6:
-                #     split_functions[i].dat.data[[0,1,5]] *= 0.5
-                # if i == 2 and split_functions[i].dat.data.shape[0] == 4:
-                #     split_functions[i].dat.data[[0,2,3]] *= 0.5
+
 
         return split_functions
     
     def use_weight(self, u, child):
-        w = Function(u.function_space())
-        w.assign(1)
+        # counts of nodes across submeshes, to fix restriction before recombinatoin
+        w = Function(u.function_space()).assign(1)
+        # w.assign(1)
         splits = self.split_function(w, child)
 
         self.recombine(splits, w, child)
-        # print("weights:", w.dat.data)
         return w
 
 
-    def recombine(self, split_funcs, f, child=True):      
+    def recombine(self, split_funcs, f, child=True):
+        # Recombines functions on submeshes to full mesh      
         V = f.function_space()  
         f.zero()
         parent_mesh = split_funcs[[*split_funcs][0]].function_space().mesh().submesh_parent
@@ -158,89 +133,82 @@ class AdaptiveMeshHierarchy(HierarchyBase):
             assert val.function_space().mesh().submesh_parent == parent_mesh
             if isinstance(f_label, Function):
                 if child:
-                    split_label = int(str(split_label)*2)
+                    split_label = int("10" + str(split_label))
                     f_label.interpolate(val, subset=parent_mesh.cell_subset(split_label))
                 else:
                     f_label.interpolate(val, subset=parent_mesh.cell_subset(split_label))
             if isinstance(f_label, Cofunction):
                 if child:
-                    split_label = int(str(split_label)*2)
+                    split_label = int("10" + str(split_label))
                     f_label = cofun_interpolate(val, f_label, subset=parent_mesh.cell_subset(split_label))
                 else: 
                     f_label = cofun_interpolate(val, f_label, subset=parent_mesh.cell_subset(split_label))
         return f
 
 
-def get_c2f_f2c_fd(mesh, num_parents, coarse_mesh):
+def get_c2f_f2c_fd(mesh, coarse_mesh):
+    # Construct coarse -> fine and fine -> coarse relations by mapping netgen elements to fd 
     V = FunctionSpace(mesh, "DG", 0)
-    V2 = FunctionSpace(coarse_mesh, "DG", 0) # dummy mesh for ng -> fd mapping
+    V2 = FunctionSpace(coarse_mesh, "DG", 0)
     ngmesh = mesh.netgen_mesh
-    P = ngmesh.Coordinates()
-    parents = ngmesh.GetParentSurfaceElements()
+    num_parents = coarse_mesh.num_cells()
+    
+    if mesh.topology_dm.getDimension() == 2:
+        parents = ngmesh.GetParentSurfaceElements()
+        elements = ngmesh.Elements2D()
+    if mesh.topology_dm.getDimension() == 3:
+        parents = ngmesh.GetParentElements()
+        elements = ngmesh.Elements3D()
     fine_mapping = lambda x: mesh._cell_numbering.getOffset(x)
     coarse_mapping = lambda x: coarse_mesh._cell_numbering.getOffset(x)
-    u = Function(V); u.rename("fd_parent_element")
-   
+
     c2f = [[] for _ in range(num_parents)]
-    f2c = [[] for _ in range(len(ngmesh.Elements2D()))]
-    for l, el in enumerate(ngmesh.Elements2D()):
-        pts = [P[k.nr-1] for k in list(el.vertices)] 
-        bary = (1/3)*sum(pts)
-        k = mesh.locate_cell(bary) 
-        if parents[l] == -1 or l < num_parents: # need the second statement if multiple refinements occur on the same parent mesh
-            u.dat.data[k] = coarse_mapping(l)
+    f2c = [[] for _ in range(mesh.num_cells())]
+    for l, _ in enumerate(elements):
+        if parents[l] == -1 or l < num_parents:
             f2c[fine_mapping(l)].append(coarse_mapping(l))
             c2f[coarse_mapping(l)].append(fine_mapping(l))
         elif parents[l] < num_parents:
-            u.dat.data[k] = coarse_mapping(parents[l])
             f2c[fine_mapping(l)].append(coarse_mapping(parents[l]))
             c2f[coarse_mapping(parents[l])].append(fine_mapping(l))
         else:
-            u.dat.data[k] = coarse_mapping(parents[parents[l]])
-            f2c[fine_mapping(l)].append(coarse_mapping(parents[parents[l]]))
-            c2f[coarse_mapping(parents[parents[l]])].append(fine_mapping(l))
-        
-    #VTKFile(f"output/fd_mesh_test_{num_parents}.pvd").write(u)
+            a = parents[parents[l]]
+            while coarse_mapping(a) >= num_parents:
+                a = parents[a]
+
+            # if coarse_mapping(parents[parents[l]]) >= num_parents:
+            #     print(num_parents)
+            #     print(l, parents[parents[l]], coarse_mapping(parents[parents[l]]))
+            #     continue
+            # f2c[fine_mapping(l)].append(coarse_mapping(parents[parents[l]]))
+            # c2f[coarse_mapping(parents[parents[l]])].append(fine_mapping(l))
+
+            f2c[fine_mapping(l)].append(coarse_mapping(a))
+            c2f[coarse_mapping(a)].append(fine_mapping(l))
+    
     return c2f, np.array(f2c).astype(int)
 
 def split_to_submesh(mesh, coarse_mesh, c2f, f2c):
+    # Splits mesh into numberings to generate submeshes
     V = FunctionSpace(mesh, "DG", 0)
-    V2 = FunctionSpace(coarse_mesh, "DG", 0) 
-    v = Function(V2, name="bisected_elements")
-    z = Function(V2, name="trisected_elements")
-    w = Function(V2, name="quadrisected_elements")
-    coarse_intersect = Function(V2, name="unsplit_elements")
-    v_fine = Function(V, name="bisected_children")
-    z_fine = Function(V, name="trisected_children")
-    w_fine = Function(V, name="quadrisected_children")
-    fine_intersect = Function(V, name="unsplit_children")
-    
+    V2 = FunctionSpace(coarse_mesh, "DG", 0)
+    coarse_splits = {i: Function(V2, name=f"{i}_elements") for i in range(1,17)}
+    fine_splits = {i: Function(V, name=f"{i}_elements") for i in range(1,17)}
     num_children = np.zeros((len(c2f)))
 
     for i in range(len(c2f)):
-        v.dat.data[i], z.dat.data[i], w.dat.data[i], num_children[i] = 0, 0, 0, 1
-        if len(c2f[i]) == 2: 
-            v.dat.data[i] = 1
-            num_children[i] = 2
-        if len(c2f[i]) == 3:
-            z.dat.data[i] = 1
-            num_children[i] = 3
-        if len(c2f[i]) == 4: 
-            w.dat.data[i] = 1
-            num_children[i] = 4 
+        n = len(c2f[i])
+        if 1 <= n <= 16:
+            coarse_splits[n].dat.data[i] = 1
+            num_children[i] = n
 
-    v_fine.dat.data[:], w_fine.dat.data[:], z_fine.dat.data[:] = np.zeros(v_fine.dat.data.shape), np.zeros(w_fine.dat.data.shape), np.zeros(z_fine.dat.data.shape)
-    v_fine.dat.data[num_children[f2c.squeeze()] == 2] = 1
-    z_fine.dat.data[num_children[f2c.squeeze()] == 3] = 1
-    w_fine.dat.data[num_children[f2c.squeeze()] == 4] = 1
+    for i in range(1,17):
+        fine_splits[i].dat.data[num_children[f2c.squeeze()] == i] = 1
 
-    coarse_intersect.dat.data[:] = np.logical_and(np.logical_and(v.dat.data == 0, w.dat.data == 0), z.dat.data == 0)
-    fine_intersect.dat.data[:] = np.logical_and(np.logical_and(v_fine.dat.data == 0, w_fine.dat.data == 0), z_fine.dat.data == 0)
-    
-    return v, z, w, coarse_intersect, v_fine, z_fine, w_fine, fine_intersect, num_children
+    return coarse_splits, fine_splits, num_children
  
 def full_to_sub(mesh, submesh, label):
-    # returns the submesh element number associated with the mesh number
+    # returns the submesh element number associated with the full mesh numbering
     V1=FunctionSpace(mesh, "DG", 0)
     V2=FunctionSpace(submesh,  "DG", 0)
     u1=Function(V1)
@@ -254,219 +222,10 @@ def cofun_as_function(c):
     return Function(c.function_space().dual(), val=c.dat)
 
 def cofun_interpolate(rsource, rtarget, subset=None):
-    # print("rtarget in", rtarget.dat.data)
+    # Workaround to call interpolate on Cofunctions, only used for restrictions
     usource = cofun_as_function(rsource)
     utarget = cofun_as_function(rtarget)
     temp = Function(utarget.function_space())
     temp.interpolate(usource, subset=subset)
     utarget.assign(utarget + temp)
-    # print("rtarget out", rtarget.dat.data)
     return rtarget
-
-
-
-
-
-
-       
-
-if __name__ == "__main__":
-    # mesh = UnitSquareMesh(4, 4)
-    # mh = MeshHierarchy(mesh, 2)
-    # print(mh.fine_to_coarse_cells)
-
-    ## EXAMPLE 1: NG UNIFORM W TRANSFERMANAGER
-    # wp = WorkPlane()
-    # wp.Rectangle(2,2)
-    # face = wp.Face()
-    # geo = OCCGeometry(face, dim=2)
-    # maxh = 0.1
-    # ngmesh = geo.GenerateMesh(maxh=maxh)
-    # mesh = Mesh(ngmesh)
-    # mh = AdaptiveMeshHierarchy([mesh])
-    # for i in range(2):
-    #     ngmesh.Refine(adaptive=True)
-    #     mesh = Mesh(ngmesh)
-    #     mh.add_mesh(mesh, netgen_flags=True)
-
-    # amh = mh.build()
-    # xcoarse, ycoarse = SpatialCoordinate(amh[0])
-    # xfine, yfine = SpatialCoordinate(amh[-1]) 
-    # Vcoarse = FunctionSpace(amh[0], "DG", 0)
-    # Vfine = FunctionSpace(amh[-1], "DG", 0)
-    # u = Function(Vcoarse)
-    # v = Function(Vfine)
-    # u.rename("coarse")
-    # v.rename("fine")
-    # #Evaluate sin function on coarse mesh
-    # u.interpolate(sin(pi*xcoarse)*sin(pi*ycoarse))
-    # tm = TransferManager()
-    # tm.prolong(u, v)
-    # File("output_coarse.pvd").write(u)
-    # File("output_fine.pvd").write(v)
-
-
-    # ## EXAMPLE 2: NG NON-UNIFORM W TRANSFERMANAGER, won't work as of right now since requires fixed length arrays for c2f & f2c
-    # import random
-    # random.seed(1234)
-    # wp = WorkPlane()
-    # wp.Rectangle(2,2)
-    # face = wp.Face()
-    # geo = OCCGeometry(face, dim=2)
-    # maxh = 0.1
-    # ngmesh = geo.GenerateMesh(maxh=maxh)
-    # mesh = Mesh(ngmesh, name = "coarse original")
-    # amh = AdaptiveMeshHierarchy([mesh])
-    # for_ref = np.zeros((len(ngmesh.Elements2D())))
-    # for i in range(1):
-    #     for l, el in enumerate(ngmesh.Elements2D()):
-    #         el.refine = 0
-    #         if random.random() < 0.5:
-    #             el.refine = 1
-    #             for_ref[l] = 1
-    #     # el.refine = 1
-    #     ngmesh.Refine(adaptive=True)
-    #     mesh = Mesh(ngmesh, name="original")
-    #     amh.add_mesh(mesh)
-    #     #amh.refine(for_ref)
-
-    # xcoarse, ycoarse = SpatialCoordinate(amh[0])
-    # xfine, yfine = SpatialCoordinate(amh[-1]) 
-    # Vcoarse = FunctionSpace(amh[0], "DG", 0)
-    # Vfine = FunctionSpace(amh[-1], "DG", 0)
-
-    # u = Function(Vcoarse)
-    # v = Function(Vfine)
-    # u.rename("coarse")
-    # v.rename("fine")
-    # #Evaluate sin function on coarse mesh
-    # u.interpolate(sin(pi*xcoarse)*sin(pi*ycoarse))
-    # # u.interpolate(xcoarse)
-
-
-    # coarse_split = amh.split_function(u, child=False)
-    # fine_split = amh.split_function(v, child=True)
-
-    # tm = TransferManager()
-
-    # # Interpolate
-    # for i in range(1,5):
-    #     if i in coarse_split:
-    #         tm.prolong(coarse_split[i], fine_split[i])
-
-    #         VTKFile(f"output/coarse_split_recomb_test_{i}.pvd").write(coarse_split[i])
-    #         VTKFile(f"output/split_recomb_test_{i}.pvd").write(fine_split[i])
-    # # tm.prolong(u_bi, v_bi)
-    # # tm.prolong(u_tri, v_tri)
-    # # tm.prolong(u_quad, v_quad)
-    # # tm.prolong(u_unsplit, v_unsplit)
-    # amh.recombine(coarse_split, u, child=False)
-
-    # amh.recombine(fine_split, v, child=True)
-    # VTKFile("output/output_coarse_mgtest.pvd").write(u)
-    # VTKFile("output/output_fine_mgtest.pvd").write(v)
-
-    # File("output/output_coarse_bi.pvd").write(u_bi)
-    # File("output/output_coarse_tri.pvd").write(u_tri)
-    # File("output/output_coarse_quad.pvd").write(u_quad)
-    # File("output/output_coarse_unsplit.pvd").write(u_unsplit)
-    # File("output/output_fine_bi.pvd").write(v_bi)
-    # File("output/output_fine_tri.pvd").write(v_tri)
-    # File("output/output_fine_quad.pvd").write(v_quad)
-    # File("output/output_fine_unsplit.pvd").write(v_unsplit)
-
-
-
-    # EXAMPLE 3
-    import random
-    random.seed(1234)
-    wp = WorkPlane()
-    wp.Rectangle(2,2)
-    face = wp.Face()
-    geo = OCCGeometry(face, dim=2)
-    maxh = 0.1
-    ngmesh = geo.GenerateMesh(maxh=maxh)
-    mesh = Mesh(ngmesh)
-    mesh2 = Mesh(ngmesh)
-    amh = AdaptiveMeshHierarchy([mesh])
-    
-    for i in range(2):
-        # for_ref = np.zeros((len(ngmesh.Elements2D())))
-        for l, el in enumerate(ngmesh.Elements2D()):
-            el.refine = 0
-            if random.random() < 0.25:
-                el.refine = 1
-        
-                # for_ref[l] = 1
-        ngmesh.Refine(adaptive=True)
-        mesh = Mesh(ngmesh)
-        amh.add_mesh(mesh)
-        # amh.refine(for_ref)
-    # mh = MeshHierarchy(mesh2, 2)
-
-    # for i in range(2):
-    #     refs = np.ones(len(ngmesh.Elements2D()))
-    #     amh.refine(refs)
-        
-
-    xcoarse, ycoarse = SpatialCoordinate(amh[0])
-    xfine, yfine = SpatialCoordinate(amh[-1]) 
-    Vcoarse = FunctionSpace(amh[0], "CG", 1)
-    Vfine = FunctionSpace(amh[-1], "CG", 1)
-    u = Function(Vcoarse)
-    v = Function(Vfine)
-    u.rename("coarse")
-    v.rename("fine")
-
-    # PROLONG
-    
-    #Evaluate sin function on coarse mesh
-    # u.interpolate(sin(pi*xcoarse)*sin(pi*ycoarse))
-
-    # atm = AdaptiveTransferManager()
-
-    # atm.prolong(u, v, amh)
-    
-    VTKFile("output/output_coarse_atmtest.pvd").write(u)
-    VTKFile("output/output_fine_atmtest.pvd").write(v)
-
-    # RESTRICT
-    u.interpolate(xcoarse)
-    atm = AdaptiveTransferManager()
-    atm.prolong(u, v, amh)
-
-    # rf = Cofunction(Vfine.dual()).assign(1)
-    rf = assemble(TestFunction(Vfine)*dx)
-    rc = Cofunction(Vcoarse.dual()) 
-    atm.restrict(rf, rc, amh)
-    
-    assembled_rc = assemble(TestFunction(Vcoarse)*dx)
-    print("ASSEMBLED RC: ", assembled_rc.dat.data)
-    print("RC: ", rc.dat.data)
-    print("dif: ", assembled_rc.dat.data - rc.dat.data)
-    print("Adaptive TM: ", assemble(action(rc, u)), assemble(action(rf, v)))
-    print(assemble(action(assembled_rc, u)))
-    assert (assemble(action(rc, u)) - assemble(action(rf, v))) / assemble(action(rf, v)) <= 1e-2
-
-
-    # Compare against restriction from mh
-    # xcoarse, ycoarse = SpatialCoordinate(mh[0])
-    # xfine, yfine = SpatialCoordinate(mh[-1]) 
-    # Vcoarse = FunctionSpace(mh[0], "CG", 1)
-    # Vfine = FunctionSpace(mh[-1], "CG", 1)
-    
-    # tm = TransferManager()
-    # mhu  = Function(Vcoarse)
-    # mhu.interpolate(xcoarse)
-    # mhv = Function(Vfine)
-    # tm.prolong(mhu, mhv)
-
-    # mhrf = assemble(TestFunction(Vfine) * dx)
-    # mhrc = Cofunction(Vcoarse.dual())
-    
-    # tm.restrict(mhrf, mhrc)
-    # print("TM: ", assemble(action(mhrc, mhu)), assemble(action(mhrf, mhv)))
-    # test_rc = assemble(TestFunction(Vcoarse) * dx)
-    # print(assemble(action(test_rc, mhu)))
-
-   
