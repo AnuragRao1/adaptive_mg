@@ -4,6 +4,10 @@ from netgen.occ import *
 from adaptive import AdaptiveMeshHierarchy
 from adaptive_transfer_manager import AdaptiveTransferManager
 import random
+from firedrake.mg.ufl_utils import coarsen
+from firedrake.dmhooks import get_appctx
+from firedrake import dmhooks
+from firedrake.solving_utils import _SNESContext
 
 @pytest.fixture
 def amh():
@@ -277,3 +281,128 @@ def test_restrict_DG0_3D(amh3D, atm):
     
     assert np.allclose(assemble(action(rc, u_coarse)), assemble(action(rf, u_fine)), rtol=1e-12)
 
+
+def test_mg_jacobi(amh, atm):
+    V_J = FunctionSpace(amh[-1], "CG", 1)
+    (x,y) = SpatialCoordinate(amh[-1])
+    u_ex = Function(V_J, name="u_fine_real").interpolate(sin(2 * pi * x) * sin(2 * pi * y))
+    u = Function(V_J)
+    v = TestFunction(V_J)
+    bc = DirichletBC(V_J, Constant(0), "on_boundary")
+    F = inner(grad(u - u_ex), grad(v)) * dx
+
+    params = {
+            "snes_type": "ksponly",
+            "ksp_max_it": 20,
+            "ksp_type": "cg", 
+            "ksp_norm_type": "unpreconditioned",
+            "ksp_rtol": 1e-8,
+            "ksp_atol": 1e-8,
+            "pc_type": "mg",
+            "mg_levels_pc_type": "jacobi",
+            "mg_levels_ksp_type": "chebyshev",
+            "mg_levels_ksp_max_it": 2,
+            "mg_levels_ksp_richardson_scale": 1/3,
+            "mg_coarse_ksp_type": "preonly",
+            "mg_coarse_pc_type": "lu",
+            "mg_coarse_pc_factor_mat_solver_type": "mumps" 
+        }
+    
+    problem = NonlinearVariationalProblem(F, u, bc)
+    dm = u.function_space().dm
+    old_appctx = get_appctx(dm)
+    mat_type = "aij"
+    appctx = _SNESContext(problem, mat_type, mat_type, old_appctx)
+    appctx.transfer_manager = atm
+    solver = NonlinearVariationalSolver(problem, solver_parameters=params)
+    solver.set_transfer_manager(atm)
+    with dmhooks.add_hooks(dm, solver, appctx=appctx, save=False):
+        coarsen(problem, coarsen)
+    
+    solver.solve()
+    assert errornorm(u_ex, u) <= 1e-8
+
+def test_mg_patch(amh, atm):
+    def solve_sys(params):
+        V_J = FunctionSpace(amh[-1], "CG", 1)
+        (x,y) = SpatialCoordinate(amh[-1])
+        u_ex = Function(V_J, name="u_fine_real").interpolate(sin(2 * pi * x) * sin(2 * pi * y))
+        u = Function(V_J)
+        v = TestFunction(V_J)
+        bc = DirichletBC(V_J, Constant(0), "on_boundary")
+        F = inner(grad(u - u_ex), grad(v)) * dx
+
+        problem = NonlinearVariationalProblem(F, u, bc)
+
+        dm = u.function_space().dm
+        old_appctx = get_appctx(dm)
+        mat_type = "aij"
+        appctx = _SNESContext(problem, mat_type, mat_type, old_appctx)
+        appctx.transfer_manager = atm
+
+        solver = NonlinearVariationalSolver(problem, solver_parameters=params)
+        solver.set_transfer_manager(atm)
+        with dmhooks.add_hooks(dm, solver, appctx=appctx, save=False):
+            coarsen(problem, coarsen)
+    
+        solver.solve()
+        assert errornorm(u_ex, u) <= 1e-8
+
+    lu = {
+        "ksp_type": "preonly",
+        "pc_type": "lu"
+    }
+    assembled_lu = {
+        "ksp_type": "preonly",
+        "pc_type": "python",
+        "pc_python_type": "firedrake.AssembledPC",
+        "assembled": lu
+    }
+    
+    def mg_params(relax, mat_type="aij"):
+        if mat_type == "aij":
+            coarse = lu
+        else:
+            coarse = assembled_lu
+
+        return {
+            "mat_type": mat_type,
+            "ksp_type": "cg",
+            "pc_type": "mg",
+            "mg_levels": {
+                "ksp_type": "chebyshev",
+                "ksp_max_it": 1,
+                **relax
+            },
+            "mg_coarse": coarse
+        }
+    jacobi_relax = mg_params({"pc_type": "jacobi"}, mat_type="matfree")
+
+    patch_relax = mg_params({
+    "pc_type": "python",
+    "pc_python_type": "firedrake.PatchPC",
+    "patch": {
+        "pc_patch": {
+            "construct_type": "star",
+            "construct_dim": 0,
+            "sub_mat_type": "seqdense",
+            "dense_inverse": True,
+            "save_operators": True,
+            "precompute_element_tensors": True},
+        "sub_ksp_type": "preonly",
+        "sub_pc_type": "lu"}},
+    mat_type="matfree")
+
+    asm_relax = mg_params({
+    "pc_type": "python",
+    "pc_python_type": "firedrake.ASMStarPC",
+    "pc_star_backend_type": "tinyasm"})
+
+    names = {"Jacobi": jacobi_relax,
+         "Patch": patch_relax,
+         "ASM Star": asm_relax}
+    
+    for name, params in names.items():
+        print(name)
+        solve_sys(params)
+        
