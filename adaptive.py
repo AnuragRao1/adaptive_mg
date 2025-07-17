@@ -17,8 +17,6 @@ class AdaptiveMeshHierarchy(HierarchyBase):
         self.refinements_per_level = refinements_per_level
         self.nested = nested
         set_level(mesh[0], self, 0)
-
-        # Implementing setlevel might mess with the adjusted AdaptiveTransferManager
         
     def add_mesh(self, mesh):
       
@@ -41,7 +39,7 @@ class AdaptiveMeshHierarchy(HierarchyBase):
         self.coarse_to_fine_cells[Fraction(len(self.meshes) - 2,1)] = c2f 
         self.fine_to_coarse_cells[Fraction(len(self.meshes) - 1,1)] = np.array(f2c)
 
-        # split both the fine and coarse meshes into the componenets that will be split, store those 
+        # split both the fine and coarse meshes into the submeshes
         (coarse_splits, fine_splits, num_children) = split_to_submesh(mesh, coarse_mesh, c2f, f2c)
         for i in range(1,17):
             coarse_mesh.mark_entities(coarse_splits[i], i)
@@ -112,7 +110,6 @@ class AdaptiveMeshHierarchy(HierarchyBase):
     def use_weight(self, u, child):
         # counts of nodes across submeshes, to fix restriction before recombinatoin
         w = Function(u.function_space()).assign(1)
-        # w.assign(1)
         splits = self.split_function(w, child)
 
         self.recombine(splits, w, child)
@@ -153,6 +150,7 @@ def get_c2f_f2c_fd(mesh, coarse_mesh):
     V2 = FunctionSpace(coarse_mesh, "DG", 0)
     ngmesh = mesh.netgen_mesh
     num_parents = coarse_mesh.num_cells()
+    u = Function(V)
     
     if mesh.topology_dm.getDimension() == 2:
         parents = ngmesh.GetParentSurfaceElements()
@@ -165,28 +163,28 @@ def get_c2f_f2c_fd(mesh, coarse_mesh):
 
     c2f = [[] for _ in range(num_parents)]
     f2c = [[] for _ in range(mesh.num_cells())]
-    for l, _ in enumerate(elements):
+
+    for l,_ in enumerate(elements):
+
         if parents[l] == -1 or l < num_parents:
             f2c[fine_mapping(l)].append(coarse_mapping(l))
             c2f[coarse_mapping(l)].append(fine_mapping(l))
+            u.dat.data[fine_mapping(l)] = coarse_mapping(l)
+
         elif parents[l] < num_parents:
             f2c[fine_mapping(l)].append(coarse_mapping(parents[l]))
             c2f[coarse_mapping(parents[l])].append(fine_mapping(l))
+            u.dat.data[fine_mapping(l)] = coarse_mapping(parents[l])
+
         else:
             a = parents[parents[l]]
-            while coarse_mapping(a) >= num_parents:
+            while a >= num_parents:
                 a = parents[a]
-
-            # if coarse_mapping(parents[parents[l]]) >= num_parents:
-            #     print(num_parents)
-            #     print(l, parents[parents[l]], coarse_mapping(parents[parents[l]]))
-            #     continue
-            # f2c[fine_mapping(l)].append(coarse_mapping(parents[parents[l]]))
-            # c2f[coarse_mapping(parents[parents[l]])].append(fine_mapping(l))
 
             f2c[fine_mapping(l)].append(coarse_mapping(a))
             c2f[coarse_mapping(a)].append(fine_mapping(l))
-    
+            u.dat.data[fine_mapping(l)] = coarse_mapping(a)
+
     return c2f, np.array(f2c).astype(int)
 
 def split_to_submesh(mesh, coarse_mesh, c2f, f2c):

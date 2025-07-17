@@ -71,8 +71,13 @@ L = rect1 + rect2
 geo = OCCGeometry(L, dim=2)
 ngmsh = geo.GenerateMesh(maxh=0.1)
 mesh = Mesh(ngmsh)
+mesh2 = Mesh(ngmsh)
 amh = AdaptiveMeshHierarchy([mesh])
 atm = AdaptiveTransferManager()
+
+mh = MeshHierarchy(mesh2, 9)
+tm = TransferManager()
+
 
 
 max_iterations = 10
@@ -132,11 +137,30 @@ with dmhooks.add_hooks(dm, solver, appctx=appctx, save=False):
 
 solver.solve()
 VTKFile(f"output/poisson_l/mg_solution_.pvd").write(u)
-diff = Function(V_J).assign(u - uh)
-VTKFile(f"output/poisson_l/mg_solution_diff.pvd").write(diff)
+
 (eta, error_est) = estimate_error(amh[-1], u)
-print("MG Solution:")
+print("Adaptive MG Solution:")
 print(f"  ||u - u_h|| <= C x {error_est}")
+
+
+V_J = FunctionSpace(mh[-1], "CG", 1)
+(x,y) = SpatialCoordinate(mh[-1])
+f = Constant(1)
+w = Function(V_J)
+v = TestFunction(V_J)
+bc = DirichletBC(V_J, Constant(0), "on_boundary")
+F = inner(grad(w), grad(v)) * dx - inner(f, v) * dx
+problem = NonlinearVariationalProblem(F, w, bc)
+solver = NonlinearVariationalSolver(problem, solver_parameters=params)
+solver.solve()
+VTKFile(f"output/poisson_l/mh_ mg_solution.pvd").write(w)
+(eta, error_est) = estimate_error(mh[-1], w)
+print("Uniform MG Solution:")
+print(f"  ||u - u_h|| <= C x {error_est}")
+
+diff = Function(V_J).assign(u - w)
+VTKFile(f"output/poisson_l/mg_solution_diff.pvd").write(diff)
+
 
 
 # import matplotlib.pyplot as plt

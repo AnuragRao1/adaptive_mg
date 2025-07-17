@@ -117,40 +117,60 @@ from firedrake.mg.utils import get_level
 # EXAMPLE 3
 import random
 random.seed(1234)
-wp = WorkPlane()
-wp.Rectangle(2,2)
-face = wp.Face()
+# wp = WorkPlane()
+# wp.Rectangle(2,2)
+# face = wp.Face()
+# geo = OCCGeometry(face, dim=2)
 cube = Box(Pnt(0,0,0), Pnt(2,2,2))
 geo = OCCGeometry(cube, dim=3)
-maxh = 1
+maxh = 2
 ngmesh = geo.GenerateMesh(maxh=maxh)
 mesh = Mesh(ngmesh)
 mesh2 = Mesh(ngmesh)
 amh = AdaptiveMeshHierarchy([mesh])
+# VTKFile("output/meshes/initial_mesh.pvd").write(Function(FunctionSpace(mesh, "DG", 0)))
 
-for i in range(2):
+for i in range(1):
     # for_ref = np.zeros((len(ngmesh.Elements2D())))
     for l, el in enumerate(ngmesh.Elements3D()):
         el.refine = 0
-        if random.random() < 0.25:
-            el.refine = 1
+        # if random.random() < 0.05:
+        #     print(l)
+        #     el.refine = 1
+    el.refine = 1
+    #         # for_ref[l] = 1
+    # for l, el in enumerate(ngmesh.Elements2D()):
+    #     el.refine = 0
+    #     if random.random() < 0.1:
+    #         el.refine = 1
     
-            # for_ref[l] = 1
     ngmesh.Refine(adaptive=True)
     mesh = Mesh(ngmesh)
     amh.add_mesh(mesh)
     # amh.refine(for_ref)
-mh = MeshHierarchy(mesh2, 2)
-for mesh in mh.meshes:
-    print("LEVELS", get_level(mesh))
+
+# mh = MeshHierarchy(mesh2, 1)
+# u = Function(FunctionSpace(mh[-1], "DG", 0))
+# v = Function(FunctionSpace(amh[-1], "DG", 0))
+
+# for i in range(1,5):
+#     coarse_mesh = amh.submesh_hierarchies[0][i].meshes[0]
+#     fine_mesh = amh.submesh_hierarchies[0][i].meshes[1]
+#     u = Function(FunctionSpace(coarse_mesh, "DG", 0))
+#     v = Function(FunctionSpace(fine_mesh, "DG", 0))
+
+
+#     VTKFile(f"output/meshes/csubm_{i}.pvd").write(u)
+#     VTKFile(f"output/meshes/fsubm_{i}.pvd").write(v)
+
 
 # for i in range(2):
 #     refs = np.ones(len(ngmesh.Elements2D()))
 #     amh.refine(refs)
     
 
-xcoarse, ycoarse, zcoarse = SpatialCoordinate(amh[0])
-xfine, yfine, zfine = SpatialCoordinate(amh[-1]) 
+xcoarse, _, _ = SpatialCoordinate(amh[0])
+xfine, _, _ = SpatialCoordinate(amh[-1]) 
 Vcoarse = FunctionSpace(amh[0], "CG", 1)
 Vfine = FunctionSpace(amh[-1], "CG", 1)
 u = Function(Vcoarse)
@@ -164,7 +184,7 @@ v.rename("fine")
 u.interpolate(xcoarse)
 atm = AdaptiveTransferManager()
 
-atm.prolong(u, v, amh)
+atm.prolong(u, v)
 VTKFile("output/output_coarse_atmtest.pvd").write(u)
 VTKFile("output/output_fine_atmtest.pvd").write(v)
 
@@ -172,13 +192,13 @@ VTKFile("output/output_fine_atmtest.pvd").write(v)
 # # RESTRICT
 # u.interpolate(xcoarse)
 # atm = AdaptiveTransferManager()
-# atm.prolong(u, v, amh)
+# atm.prolong(u, v)
 
 
 # # rf = Cofunction(Vfine.dual()).assign(1)
 # rf = assemble(TestFunction(Vfine)*dx)
 # rc = Cofunction(Vcoarse.dual()) 
-# atm.restrict(rf, rc, amh)
+# atm.restrict(rf, rc)
 
 # assembled_rc = assemble(TestFunction(Vcoarse)*dx)
 # print("Adaptive TM: ", assemble(action(rc, u)), assemble(action(rf, v)))
