@@ -150,7 +150,6 @@ def get_c2f_f2c_fd(mesh, coarse_mesh):
     V2 = FunctionSpace(coarse_mesh, "DG", 0)
     ngmesh = mesh.netgen_mesh
     num_parents = coarse_mesh.num_cells()
-    u = Function(V)
     
     if mesh.topology_dm.getDimension() == 2:
         parents = ngmesh.GetParentSurfaceElements()
@@ -169,12 +168,10 @@ def get_c2f_f2c_fd(mesh, coarse_mesh):
         if parents[l] == -1 or l < num_parents:
             f2c[fine_mapping(l)].append(coarse_mapping(l))
             c2f[coarse_mapping(l)].append(fine_mapping(l))
-            u.dat.data[fine_mapping(l)] = coarse_mapping(l)
 
         elif parents[l] < num_parents:
             f2c[fine_mapping(l)].append(coarse_mapping(parents[l]))
             c2f[coarse_mapping(parents[l])].append(fine_mapping(l))
-            u.dat.data[fine_mapping(l)] = coarse_mapping(parents[l])
 
         else:
             a = parents[parents[l]]
@@ -183,12 +180,11 @@ def get_c2f_f2c_fd(mesh, coarse_mesh):
 
             f2c[fine_mapping(l)].append(coarse_mapping(a))
             c2f[coarse_mapping(a)].append(fine_mapping(l))
-            u.dat.data[fine_mapping(l)] = coarse_mapping(a)
 
     return c2f, np.array(f2c).astype(int)
 
 def split_to_submesh(mesh, coarse_mesh, c2f, f2c):
-    # Splits mesh into numberings to generate submeshes
+    # Splits mesh into element numberings to generate submeshes
     V = FunctionSpace(mesh, "DG", 0)
     V2 = FunctionSpace(coarse_mesh, "DG", 0)
     coarse_splits = {i: Function(V2, name=f"{i}_elements") for i in range(1,17)}

@@ -3,4 +3,5 @@ __pycache__/
 .vscode/
 demos/
 misc_images/
-output/
+**/output/
+
