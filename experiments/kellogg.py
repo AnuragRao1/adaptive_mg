@@ -1,9 +1,13 @@
+import numpy as np
+dot_prod = np.dot
 from firedrake import *
 from netgen.occ import *
 from firedrake.mg.ufl_utils import coarsen
 from firedrake.dmhooks import get_appctx
 from firedrake import dmhooks
 from firedrake.solving_utils import _SNESContext
+
+import time
 
 import sys
 import os
@@ -19,7 +23,7 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, max_iterations=10):
         v = TestFunction(V)
         bc = DirichletBC(V, u_real, "on_boundary")
 
-        W = FunctionSpace(mesh, "CG", 1)
+        W = FunctionSpace(mesh, "CG", p)
         a = Function(W)
         x = SpatialCoordinate(mesh)
         a.interpolate(conditional(x[0] * x[1] < 0, 1.0, 161.4476387975881))
@@ -50,16 +54,36 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, max_iterations=10):
         t = as_vector([-n[1], n[0]])
         v = CellVolume(mesh)
 
-        V = FunctionSpace(mesh, "CG", 1)
+        V = FunctionSpace(mesh, "CG", p)
         a = Function(V)
         x = SpatialCoordinate(mesh)
         a.interpolate(conditional(x[0] * x[1] < 0, 1.0, 161.4476387975881))
 
-        
-        u_deriv = dot(grad(u_boundary), t)
         if p > 1:
+            u_deriv = Function(V)    
+            dof_coords = Function(FunctionSpace(mesh, VectorElement("CG", mesh.ufl_cell(), 2, dim=2))).interpolate(mesh.coordinates)
+            dof_coords = dof_coords.dat.data_ro
+            
+            # have to loop over nodes, solving a variational problem is rank-deficient
+            boundary_dofs = DirichletBC(V, Constant(0), "on_boundary").nodes
+            V_vec = VectorFunctionSpace(mesh, "CG", p)
+
+            grad_u = project(grad(u_boundary), V_vec)
+            for dof in boundary_dofs:
+                x = dof_coords[dof]
+                if abs(x[0] + 1) < 1e-14:
+                    t = [0, -1]
+                elif abs(x[0] - 1) < 1e-14:
+                    t = [0, 1]
+                elif abs(x[1] - 1) < 1e-14:
+                    t = [-1, 0]
+                else:
+                    t = [1, 0]
+                
+                u_deriv.dat.data[dof] = dot_prod(grad_u.at(x), t)
+
             proj_space = FunctionSpace(mesh, "CG", p-1)
-            proj_u_deriv = Function(u_boundary.function_space()).interpolate(project(u_deriv, proj_space)) # lower dim projection
+            proj_u_deriv = Function(u_boundary.function_space()).interpolate(Function(proj_space).interpolate(u_deriv)) # lower dim projection
         else:
             avg_deriv = assemble(u_deriv * ds) / assemble(Function(u_boundary.function_space()).assign(Constant(1)) * ds)
             proj_u_deriv = Function(u_boundary.function_space()).assign(avg_deriv)
@@ -93,7 +117,6 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, max_iterations=10):
         with eta.dat.vec_ro as eta_:
             eta_max = eta_.max()[1]
 
-        theta = 0.5
         should_refine = conditional(gt(eta, theta*eta_max), 1, 0)
         markers.interpolate(should_refine)
 
@@ -134,6 +157,7 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, max_iterations=10):
     # BUILD DOMAIN
     wp = WorkPlane()
     square = wp.Rectangle(2.0,2.0).Face()
+    square = square.Move(Vec(-1.0, -1.0, 0))
     geo = OCCGeometry(square, dim=2)
     ngmsh = geo.GenerateMesh(maxh=1) 
     mesh = Mesh(ngmsh)
@@ -190,6 +214,8 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, max_iterations=10):
     error_estimators = {i: [] for i in range(max_iterations)}
     dofs = []
     k_l = []
+    times = []
+    start_time = time.time()
     for level in range(max_iterations):
         print(f"level {level}")
         V = FunctionSpace(amh[-1], "CG", p)
@@ -200,15 +226,14 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, max_iterations=10):
         error_est = 0
 
         u_real = generate_u_real(amh[-1], p)
-        u_boundary = Function(V).interpolate(u_real)
 
         while norm(uh - u_prev) > lam_alg * error_est or k == 0:
             k += 1
             u_prev.interpolate(uh)
             uh = solve_kellogg(amh[-1], p, uh, u_real, patch_relax)
 
-            (eta, error_est) = estimate_error(amh[-1], uh, u_boundary) 
-
+            (eta, error_est) = estimate_error(amh[-1], uh, u_real) 
+            print("ERROR ESTIMATE: ", error_est)
 
             error_estimators[level].append(error_est)
 
@@ -220,7 +245,9 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, max_iterations=10):
         mesh = adapt(amh[-1], eta)
         if level != max_iterations - 1:
             amh.add_mesh(mesh)
-
+        
+        times.append(time.time() - start_time)
+    print("TIMES FOR LEVELS: ", times)
 
     import matplotlib.pyplot as plt
     import numpy as np
@@ -237,4 +264,4 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, max_iterations=10):
     plt.show()
 
 if __name__ == "__main__":
-    run_system(1, 0.5, 0.01)
+    run_system(2, 0.5, 0.01, 2)
