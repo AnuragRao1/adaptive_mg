@@ -23,11 +23,12 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, max_iterations=10):
         v = TestFunction(V)
         bc = DirichletBC(V, u_real, "on_boundary")
 
-        W = FunctionSpace(mesh, "CG", p)
-        a = Function(W)
+        W = FunctionSpace(mesh, "DG", 0)
+        a = Function(V)
         x = SpatialCoordinate(mesh)
-        a.interpolate(conditional(x[0] * x[1] < 0, 1.0, 161.4476387975881))
-        F = inner(a * grad(uh), grad(v))*dx # f == 0
+        # a.interpolate(conditional(x[0] * x[1] < 0, Constant(1.0), Constant(161.4476387975881)))
+        a = conditional(x[0] * x[1] < 0, Constant(1.0), Constant(161.4476387975881))
+        F = inner(a * grad(uh), grad(v))*dx # f == 0, trying to map from constant space to CG2
         
         problem = NonlinearVariationalProblem(F, uh, bc)
 
@@ -58,10 +59,11 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, max_iterations=10):
         a = Function(V)
         x = SpatialCoordinate(mesh)
         a.interpolate(conditional(x[0] * x[1] < 0, 1.0, 161.4476387975881))
+        a = conditional(x[0] * x[1] < 0, 1.0, 161.4476387975881)
 
         if p > 1:
             u_deriv = Function(V)    
-            dof_coords = Function(FunctionSpace(mesh, VectorElement("CG", mesh.ufl_cell(), 2, dim=2))).interpolate(mesh.coordinates)
+            dof_coords = Function(FunctionSpace(mesh, VectorElement("CG", mesh.ufl_cell(), p, dim=2))).interpolate(mesh.coordinates)
             dof_coords = dof_coords.dat.data_ro
             
             # have to loop over nodes, solving a variational problem is rank-deficient
@@ -85,6 +87,7 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, max_iterations=10):
             proj_space = FunctionSpace(mesh, "CG", p-1)
             proj_u_deriv = Function(u_boundary.function_space()).interpolate(Function(proj_space).interpolate(u_deriv)) # lower dim projection
         else:
+            u_deriv = dot(grad(u_boundary), t)
             avg_deriv = assemble(u_deriv * ds) / assemble(Function(u_boundary.function_space()).assign(Constant(1)) * ds)
             proj_u_deriv = Function(u_boundary.function_space()).assign(avg_deriv)
 
@@ -95,7 +98,7 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, max_iterations=10):
             - inner(v('-')**0.5 * jump(a * grad(uh), n)**2, w('-')) * dS
             - inner(v ** 0.5 * (u_deriv - proj_u_deriv)**2, w) * ds
             )
-        
+
         sp = {"mat_type": "matfree", "ksp_type": "richardson", "pc_type": "jacobi"}
         solve(G == 0, eta_sq, solver_parameters=sp)
         eta = Function(W).interpolate(sqrt(eta_sq))  # compute eta from eta^2
@@ -163,6 +166,7 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, max_iterations=10):
     mesh = Mesh(ngmsh)
     amh = AdaptiveMeshHierarchy([mesh])
     atm = AdaptiveTransferManager()
+    tm = TransferManager()
 
 
     # ESTABLISH SOLVER PARAMS
@@ -206,12 +210,19 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, max_iterations=10):
             "precompute_element_tensors": True},
         "sub_ksp_type": "preonly",
         "sub_pc_type": "lu"}},
-    mat_type="matfree")
+    mat_type="aij")
     
+    asm_relax = mg_params({
+    "pc_type": "python",
+    "pc_python_type": "firedrake.ASMStarPC",
+    "pc_star_backend_type": "tinyasm"})
+
+    jacobi_relax = mg_params({"pc_type": "jacobi"}, mat_type="matfree")
 
     # ITERATIVE LOOP
     max_iterations = max_iterations
     error_estimators = {i: [] for i in range(max_iterations)}
+    true_errors = []
     dofs = []
     k_l = []
     times = []
@@ -221,10 +232,12 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, max_iterations=10):
         V = FunctionSpace(amh[-1], "CG", p)
         uh = Function(V, name="solution")
         u_prev = Function(V, name="u_prev")
+        
+        if level > 0:
+            tm.prolong(u_k, uh)       
 
         k = 0
         error_est = 0
-
         u_real = generate_u_real(amh[-1], p)
 
         while norm(uh - u_prev) > lam_alg * error_est or k == 0:
@@ -237,11 +250,14 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, max_iterations=10):
 
             error_estimators[level].append(error_est)
 
+        u_k = Function(V).interpolate(uh)
         VTKFile(f"output/kellogg/{p}_{theta}_{lam_alg}_levels={max_iterations}/{level}_{k}.pvd").write(uh)
         k_l.append(k)
         dofs.append(uh.function_space().dim())
-    
 
+        err_real = norm(u_k - u_real)
+        print("TRUE ERROR: ", err_real)
+        true_errors.append(err_real)
         mesh = adapt(amh[-1], eta)
         if level != max_iterations - 1:
             amh.add_mesh(mesh)
@@ -257,6 +273,7 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, max_iterations=10):
     plt.loglog(dofs, final_errors, '-ok', label="Measured convergence")
     scaling = 1.5 * error_estimators[0][-1]/dofs[0]**-(0.5)
     plt.loglog(dofs, np.array(dofs)**(-0.5) * scaling, '--', label="Optimal convergence")
+    plt.loglog(dofs, true_errors, '-ok', label="True Error Norm")
     plt.xlabel("Number of degrees of freedom")
     plt.ylabel(r"Error estimate of energy norm $\sqrt{\sum_K \eta_K^2}$ for $u_l^{\hat{k}}$")
     plt.legend()
@@ -264,4 +281,4 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, max_iterations=10):
     plt.show()
 
 if __name__ == "__main__":
-    run_system(2, 0.5, 0.01, 2)
+    run_system(1, 0.5, 0.01, 10)
