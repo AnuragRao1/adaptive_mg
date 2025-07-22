@@ -61,42 +61,13 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, max_iterations=10):
         a.interpolate(conditional(x[0] * x[1] < 0, 1.0, 161.4476387975881))
         a = conditional(x[0] * x[1] < 0, 1.0, 161.4476387975881)
 
-        if p > 1:
-            u_deriv = Function(V)    
-            dof_coords = Function(FunctionSpace(mesh, VectorElement("CG", mesh.ufl_cell(), p, dim=2))).interpolate(mesh.coordinates)
-            dof_coords = dof_coords.dat.data_ro
-            
-            # have to loop over nodes, solving a variational problem is rank-deficient
-            boundary_dofs = DirichletBC(V, Constant(0), "on_boundary").nodes
-            V_vec = VectorFunctionSpace(mesh, "CG", p)
-
-            grad_u = project(grad(u_boundary), V_vec)
-            for dof in boundary_dofs:
-                x = dof_coords[dof]
-                if abs(x[0] + 1) < 1e-14:
-                    t = [0, -1]
-                elif abs(x[0] - 1) < 1e-14:
-                    t = [0, 1]
-                elif abs(x[1] - 1) < 1e-14:
-                    t = [-1, 0]
-                else:
-                    t = [1, 0]
-                
-                u_deriv.dat.data[dof] = dot_prod(grad_u.at(x), t)
-
-            proj_space = FunctionSpace(mesh, "CG", p-1)
-            proj_u_deriv = Function(u_boundary.function_space()).interpolate(Function(proj_space).interpolate(u_deriv)) # lower dim projection
-        else:
-            u_deriv = dot(grad(u_boundary), t)
-            avg_deriv = assemble(u_deriv * ds) / assemble(Function(u_boundary.function_space()).assign(Constant(1)) * ds)
-            proj_u_deriv = Function(u_boundary.function_space()).assign(avg_deriv)
-
         G = (
             inner(eta_sq / v, w) * dx 
             - inner(v * div(a * grad(uh))**2, w) * dx 
             - inner(v('+')**0.5 * jump(a * grad(uh), n)**2, w('+')) * dS
             - inner(v('-')**0.5 * jump(a * grad(uh), n)**2, w('-')) * dS
-            - inner(v ** 0.5 * (u_deriv - proj_u_deriv)**2, w) * ds
+            #- inner(v ** 0.5 * (u_deriv - proj_u_deriv)**2, w) * ds
+            - inner(v ** 0.5 * dot(grad(u_boundary - uh), t)**2, w) * ds
             )
 
         sp = {"mat_type": "matfree", "ksp_type": "richardson", "pc_type": "jacobi"}
