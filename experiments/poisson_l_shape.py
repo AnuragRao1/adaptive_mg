@@ -7,16 +7,28 @@ from firedrake.dmhooks import get_appctx
 from firedrake import dmhooks
 from firedrake.solving_utils import _SNESContext
 
-def solve_poisson(mesh):
+def solve_poisson(mesh, params):
     V = FunctionSpace(mesh, "CG", 1)
     uh = Function(V, name="Solution")
     v = TestFunction(V)
-    bc = DirichletBC(V, 0, "on_boundary")
+    bc = DirichletBC(V, Constant(0), "on_boundary")
     f = Constant(1)
     F = inner(grad(uh), grad(v))*dx - inner(f, v)*dx
-    solve(F == 0, uh, bc)
-    return uh
+    
+    problem = NonlinearVariationalProblem(F, uh, bc)
 
+    dm = uh.function_space().dm
+    old_appctx = get_appctx(dm)
+    mat_type = params["mat_type"]
+    appctx = _SNESContext(problem, mat_type, mat_type, old_appctx)
+    appctx.transfer_manager = atm
+    solver = NonlinearVariationalSolver(problem, solver_parameters=params)
+    solver.set_transfer_manager(atm)
+    with dmhooks.add_hooks(dm, solver, appctx=appctx, save=False):
+        coarsen(problem, coarsen)
+
+    solver.solve()
+    return uh
 
 def estimate_error(mesh, uh):
     W = FunctionSpace(mesh, "DG", 0)
@@ -78,18 +90,60 @@ atm = AdaptiveTransferManager()
 mh = MeshHierarchy(mesh2, 9)
 tm = TransferManager()
 
+lu = {
+        "ksp_type": "preonly",
+        "pc_type": "lu"
+    }
+assembled_lu = {
+        "ksp_type": "preonly",
+        "pc_type": "python",
+        "pc_python_type": "firedrake.AssembledPC",
+        "assembled": lu
+    }
+def mg_params(relax, mat_type="aij"):
+    if mat_type == "aij":
+        coarse = lu
+    else:
+        coarse = assembled_lu
 
+    return {
+        "mat_type": mat_type,
+        "ksp_type": "cg",
+        "pc_type": "mg",
+        "mg_levels": {
+            "ksp_type": "chebyshev",
+            "ksp_max_it": 1,
+            **relax
+        },
+        "mg_coarse": coarse
+    }
+patch_relax = mg_params({
+"pc_type": "python",
+"pc_python_type": "firedrake.PatchPC",
+"patch": {
+    "pc_patch": {
+        "construct_type": "star",
+        "construct_dim": 0,
+        "sub_mat_type": "seqdense",
+        "dense_inverse": True,
+        "save_operators": True,
+        "precompute_element_tensors": True},
+    "sub_ksp_type": "preonly",
+    "sub_pc_type": "lu"}},
+mat_type="aij")
 
-max_iterations = 10
+max_iterations = 15
 error_estimators = []
 dofs = []
 for i in range(max_iterations):
     print(f"level {i}")
 
-    uh = solve_poisson(mesh)
-    VTKFile(f"output/poisson_l/adaptive_loop_{i}.pvd").write(uh)
+    uh = solve_poisson(mesh, patch_relax)
+    VTKFile(f"output/poisson_l/{max_iterations}/adaptive_loop_{i}.pvd").write(uh)
 
     (eta, error_est) = estimate_error(mesh, uh)
+    VTKFile(f"output/poisson_l/{max_iterations}/eta_{i}.pvd").write(eta)
+
     print(f"  ||u - u_h|| <= C x {error_est}")
     error_estimators.append(error_est)
     dofs.append(uh.function_space().dim())
@@ -98,80 +152,15 @@ for i in range(max_iterations):
     if i != max_iterations - 1:
         amh.add_mesh(mesh)
 
-V_J = FunctionSpace(amh[-1], "CG", 1)
-(x,y) = SpatialCoordinate(amh[-1])
-f = Constant(1)
-u = Function(V_J)
-v = TestFunction(V_J)
-bc = DirichletBC(V_J, Constant(0), "on_boundary")
-F = inner(grad(u), grad(v)) * dx - inner(f, v) * dx
+import matplotlib.pyplot as plt
+import numpy as np
 
-params = {
-        "snes_type": "ksponly",
-        "ksp_max_it": 20,
-        "ksp_type": "cg", 
-        "ksp_norm_type": "unpreconditioned",
-        "ksp_rtol": 1e-8,
-        "ksp_atol": 1e-8,
-        "ksp_view": None,
-        "pc_type": "mg",
-        "mg_levels_pc_type": "jacobi",
-        "mg_levels_ksp_type": "chebyshev",
-        "mg_levels_ksp_max_it": 2,
-        "mg_levels_ksp_richardson_scale": 1/3,
-        "mg_coarse_ksp_type": "preonly",
-        "mg_coarse_pc_type": "lu",
-        "mg_coarse_pc_factor_mat_solver_type": "mumps" 
-    }
-
-problem = NonlinearVariationalProblem(F, u, bc)
-dm = u.function_space().dm
-old_appctx = get_appctx(dm)
-mat_type = "aij"
-appctx = _SNESContext(problem, mat_type, mat_type, old_appctx)
-appctx.transfer_manager = atm
-solver = NonlinearVariationalSolver(problem, solver_parameters=params)
-solver.set_transfer_manager(atm)
-with dmhooks.add_hooks(dm, solver, appctx=appctx, save=False):
-    coarsen(problem, coarsen)
-
-solver.solve()
-VTKFile(f"output/poisson_l/mg_solution_.pvd").write(u)
-
-(eta, error_est) = estimate_error(amh[-1], u)
-print("Adaptive MG Solution:")
-print(f"  ||u - u_h|| <= C x {error_est}")
-
-
-V_J = FunctionSpace(mh[-1], "CG", 1)
-(x,y) = SpatialCoordinate(mh[-1])
-f = Constant(1)
-w = Function(V_J)
-v = TestFunction(V_J)
-bc = DirichletBC(V_J, Constant(0), "on_boundary")
-F = inner(grad(w), grad(v)) * dx - inner(f, v) * dx
-problem = NonlinearVariationalProblem(F, w, bc)
-solver = NonlinearVariationalSolver(problem, solver_parameters=params)
-solver.solve()
-VTKFile(f"output/poisson_l/mh_ mg_solution.pvd").write(w)
-(eta, error_est) = estimate_error(mh[-1], w)
-print("Uniform MG Solution:")
-print(f"  ||u - u_h|| <= C x {error_est}")
-
-diff = Function(V_J).assign(u - w)
-VTKFile(f"output/poisson_l/mg_solution_diff.pvd").write(diff)
-
-
-
-# import matplotlib.pyplot as plt
-# import numpy as np
-
-# plt.grid()
-# plt.loglog(dofs, error_estimators, '-ok', label="Measured convergence")
-# scaling = 1.5 * error_estimators[0]/dofs[0]**-(0.5)
-# plt.loglog(dofs, np.array(dofs)**(-0.5) * scaling, '--', label="Optimal convergence")
-# plt.xlabel("Number of degrees of freedom")
-# plt.ylabel(r"Error estimate of energy norm $\sqrt{\sum_K \eta_K^2}$")
-# plt.legend()
-# plt.savefig("adaptive_convergence.png")
-# #plt.show()
+plt.grid()
+plt.loglog(dofs, error_estimators, '-ok', label="Measured convergence")
+scaling = 1.5 * error_estimators[0]/dofs[0]**-(0.5)
+plt.loglog(dofs, np.array(dofs)**(-0.5) * scaling, '--', label="Optimal convergence")
+plt.xlabel("Number of degrees of freedom")
+plt.ylabel(r"Error estimate of energy norm $\sqrt{\sum_K \eta_K^2}$")
+plt.legend()
+plt.savefig(f"output/poisson_l/{max_iterations}/adaptive_convergence_{i}.png")
+plt.show()

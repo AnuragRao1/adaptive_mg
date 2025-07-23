@@ -55,53 +55,23 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, max_iterations=10):
         t = as_vector([-n[1], n[0]])
         v = CellVolume(mesh)
 
-        V = FunctionSpace(mesh, "CG", p)
-        # a = Function(V)
         x = SpatialCoordinate(mesh)
-        # a.interpolate(conditional(x[0] * x[1] < 0, 1.0, 161.4476387975881))
         a = conditional(x[0] * x[1] < 0, 1.0, 161.4476387975881)
-
-        if p > 1:
-            u_deriv = Function(V)    
-            dof_coords = Function(FunctionSpace(mesh, VectorElement("CG", mesh.ufl_cell(), p, dim=2))).interpolate(mesh.coordinates)
-            dof_coords = dof_coords.dat.data_ro
-            
-            # have to loop over nodes, solving a variational problem is diverging
-            boundary_dofs = DirichletBC(V, Constant(0), "on_boundary").nodes
-            V_vec = VectorFunctionSpace(mesh, "CG", p)
-
-            grad_u = project(grad(u_boundary), V_vec)
-            for dof in boundary_dofs:
-                x = dof_coords[dof]
-                if abs(x[0] + 1) < 1e-14:
-                    t = [0, -1]
-                elif abs(x[0] - 1) < 1e-14:
-                    t = [0, 1]
-                elif abs(x[1] - 1) < 1e-14:
-                    t = [-1, 0]
-                else:
-                    t = [1, 0]
-                
-                u_deriv.dat.data[dof] = dot_prod(grad_u.at(x), t)
-
-            proj_space = FunctionSpace(mesh, "CG", p-1)
-            proj_u_deriv = Function(u_boundary.function_space()).interpolate(Function(proj_space).interpolate(u_deriv)) # lower dim projection
-        else:
-            u_deriv = dot(grad(u_boundary), t)
-            avg_boundary_deriv = assemble(u_deriv * ds) / assemble(Function(u_boundary.function_space()).assign(Constant(1)) * ds)
-            proj_u_deriv = Function(u_boundary.function_space()).assign(avg_boundary_deriv)
 
         G = (
             inner(eta_sq / v, w) * dx 
             - inner(v * div(a * grad(uh))**2, w) * dx 
             - inner(v('+')**0.5 * jump(a * grad(uh), n)**2, w('+')) * dS
             - inner(v('-')**0.5 * jump(a * grad(uh), n)**2, w('-')) * dS
-            - inner(v ** 0.5 * (u_deriv - proj_u_deriv)**2, w) * ds
+            #- inner(v ** 0.5 * (u_deriv - proj_u_deriv)**2, w) * ds
+            - inner(v**0.5 * dot(grad(u_boundary - uh), t)**2, w) * ds
             )
 
         sp = {"mat_type": "matfree", "ksp_type": "richardson", "pc_type": "jacobi"}
         solve(G == 0, eta_sq, solver_parameters=sp)
         eta = Function(W).interpolate(sqrt(eta_sq))  # compute eta from eta^2
+        VTKFile(f"output/kellogg/{theta}_{lam_alg}_levels={max_iterations}/{p}/eta_{level}.pvd").write(eta)
+
 
         with eta.dat.vec_ro as eta_:  # compute estimate for error in energy norm
             error_est = sqrt(eta_.dot(eta_))
@@ -266,61 +236,93 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, max_iterations=10):
     print("TIMES FOR LEVELS: ", times)
 
     final_errors = [error_estimators[key][-1] for key in error_estimators]
-    return p, dofs, final_errors, true_errors
+    return dofs, final_errors, true_errors
 
     
 
 if __name__ == "__main__":
-    from mpi4py import MPI
+    # from mpi4py import MPI
 
-    comm = MPI.COMM_WORLD
-    rank = comm.Get_rank()
-    size = comm.Get_size()
+    # comm = MPI.COMM_WORLD
+    # rank = comm.Get_rank()
+    # size = comm.Get_size()
 
     theta = 0.5
     lambda_alg = 0.01
-    levels = 2
-
-    errors_true = {}
-    errors_est = {}
-    dofs = {}
-    results = [run_system(i, theta, lambda_alg, levels) for i in range(1, 5)]
-    all_results = comm.gather(results, root=0)
-    print(all_results)
+    levels = 25
 
 
-    for i in range(4):
-        (p, dof, est, true) = all_results[0][i]
-        errors_true[p] = true
-        errors_est[p] = est
-        dofs[p] = dof
+    # errors_true = {}
+    # errors_est = {}
+    # dofs = {}
+    # # results = [run_system(i, theta, lambda_alg, levels) for i in range(1, 5)]
+    # # all_results = comm.gather(results, root=0)
+    # # print(all_results)
+
+    # for p in range(1,5):
+    #     (dof, est, true) = run_system(p, theta, lambda_alg, levels)
+    #     dofs[p] = dof
+    #     errors_est[p] = est
+    #     errors_true[p] = true
+
+    # # for i in range(4):
+    # #     (p, dof, est, true) = all_results[0][i]
+    # #     errors_true[p] = true
+    # #     errors_est[p] = est
+    # #     dofs[p] = dof
 
     import matplotlib.pyplot as plt
     import numpy as np
 
-    colors = ['blue', 'green', 'red', 'purple']  
+    # colors = ['blue', 'green', 'red', 'purple']  
+    # plt.figure(figsize=(8, 6))
+    # plt.grid(True)
+    # for p in range(4):
+    #     plt.loglog(dofs[p+1], errors_est[p+1], '-ok', color=colors[p], label=f"Measured convergence $p={p+1}$")
+
+    # plt.xlabel("Number of degrees of freedom")
+    # plt.ylabel(r"Estimated energy norm $\sqrt{\sum_K \eta_K^2}$")
+    # plt.legend()
+    # plt.title("Estimated Error Convergence")
+    # plt.savefig(f"output/kellogg/{theta}_{lambda_alg}_levels={levels}/adaptive_convergence_est.png")
+
+
+    # plt.figure(figsize=(8, 6))
+    # plt.grid(True)
+    # for p in range(4):
+    #     plt.loglog(dofs[p+1], errors_true[p+1], '-.', color=colors[p], label=f"True Error Norm $p={p+1}$")
+
+    # plt.xlabel("Number of degrees of freedom")
+    # plt.ylabel(r"True error norm $\|u - u_h\|$")
+    # plt.legend()
+    # plt.title("True Error Convergence")
+    # plt.savefig(f"output/kellogg/{theta}_{lambda_alg}_levels={levels}/adaptive_convergence_true.png")
+
+    # plt.show()
+
+
+    #### SINGLE SAMPLE
+    p = 2
+    (dofs, errors_est, errors_true) = run_system(p, theta, lambda_alg, levels)
+   
     plt.figure(figsize=(8, 6))
     plt.grid(True)
-    for p in range(4):
-        plt.loglog(dofs[p+1], errors_est[p+1], '-ok', color=colors[p], label=f"Measured convergence $p={p+1}$")
+    plt.loglog(dofs, errors_est, '-ok')
 
     plt.xlabel("Number of degrees of freedom")
     plt.ylabel(r"Estimated energy norm $\sqrt{\sum_K \eta_K^2}$")
-    plt.legend()
-    plt.title("Estimated Error Convergence")
-    plt.savefig(f"output/kellogg/{theta}_{lambda_alg}_levels={levels}/adaptive_convergence_est.png")
+    plt.title(f"Estimated Error Convergence p={p}")
+    plt.savefig(f"output/kellogg/{theta}_{lambda_alg}_levels={levels}/{p}/adaptive_convergence_est.png")
 
 
     plt.figure(figsize=(8, 6))
     plt.grid(True)
-    for p in range(4):
-        plt.loglog(dofs[p+1], errors_true[p+1], '-.', color=colors[p], label=f"True Error Norm $p={p+1}$")
+    plt.loglog(dofs, errors_true, '-.')
 
     plt.xlabel("Number of degrees of freedom")
     plt.ylabel(r"True error norm $\|u - u_h\|$")
-    plt.legend()
-    plt.title("True Error Convergence")
-    plt.savefig(f"output/kellogg/{theta}_{lambda_alg}_levels={levels}/adaptive_convergence_true.png")
+    plt.title(f"True Error Convergence p={p}")
+
+    plt.savefig(f"output/kellogg/{theta}_{lambda_alg}_levels={levels}/{p}/adaptive_convergence_true.png")
 
     plt.show()
-    # run_system(2, 0.5,0.01, 10)
