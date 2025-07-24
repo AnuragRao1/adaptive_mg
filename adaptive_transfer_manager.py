@@ -3,8 +3,6 @@ from firedrake import *
 from firedrake.mg.embedded import TransferManager
 from firedrake.mg.utils import get_level
 
-import time
-
 __all__ = ("AdaptiveTransferManager", )
 
 
