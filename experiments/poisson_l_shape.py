@@ -55,7 +55,7 @@ def estimate_error(mesh, uh):
     # Each cell is an independent 1x1 solve, so Jacobi is exact
     sp = {"mat_type": "matfree", "ksp_type": "richardson", "pc_type": "jacobi"}
     solve(G == 0, eta_sq, solver_parameters=sp)
-    eta = Function(W).interpolate(sqrt(eta_sq))  # compute eta from eta^2
+    eta = Function(W, name="eta").interpolate(sqrt(eta_sq))  # compute eta from eta^2
 
     with eta.dat.vec_ro as eta_:  # compute estimate for error in energy norm
         error_est = sqrt(eta_.dot(eta_))
@@ -136,7 +136,7 @@ patch_relax = mg_params({
     "sub_pc_type": "lu"}},
 mat_type="aij")
 
-max_iterations = 10
+max_iterations = 15
 error_estimators = []
 dofs = []
 for i in range(max_iterations):
