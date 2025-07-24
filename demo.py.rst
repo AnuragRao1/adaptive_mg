@@ -12,7 +12,7 @@ We begin by importing the necessary libraries ::
 
 Constructing the Mesh Hierarchy
 ---------------------------
-We first must construct the domain over which we will solve the problem. For a more comprehensive demo on how to use Open Cascade Technology (OCC) and Constructive Solid Geometry (CSG), see `here <https://www.firedrakeproject.org/demos/netgen_mesh.py.html>`_ . 
+We first must construct the domain over which we will solve the problem. For a more comprehensive demo on how to use Open Cascade Technology (OCC) and Constructive Solid Geometry (CSG), see `Netgen integration in Firedrake <https://www.firedrakeproject.org/demos/netgen_mesh.py.html>`_ . 
 We begin with the L-shaped domain, which we build as the union of two rectangles: ::
   rect1 = WorkPlane(Axes((0,0,0), n=Z, h=X)).Rectangle(1,2).Face()
   rect2 = WorkPlane(Axes((0,1,0), n=Z, h=X)).Rectangle(2,1).Face()
@@ -36,7 +36,7 @@ Now we can define a simple Poisson Problem
 
    - \nabla^2 u = f \text{ in } \Omega, \quad u = 0 \text{ on } \partial \Omega
 
-We define the function solve_poisson. The first lines correspond to finding a solution in the CG1 space. The variational problem is formulated in F, where f is the constant function equal to 1: ::
+Our approach strongly follows the similar problem in this `lecture course <https://github.com/pefarrell/icerm2024>`_. We define the function solve_poisson. The first lines correspond to finding a solution in the CG1 space. The variational problem is formulated with F, where f is the constant function equal to 1. Since we want Dirichlet boundary conditions, we construct the DirichletBC object and apply it to the entire boundary: ::
 
    def solve_poisson(mesh, params):
     V = FunctionSpace(mesh, "CG", 1)
@@ -61,129 +61,149 @@ We define the function solve_poisson. The first lines correspond to finding a so
     solver.solve()
     return uh
 
-Note the code after the construction of the NonlinearVariationalProblem(). To use the AdaptiveMeshHierarchy with the existing Firedrake solver, we have to execute the following lines before we call solver.solve(). 
-The AdaptiveTransferManager has to be set to the appctx and solver in order to use a multigrid solver. ::
-Now we are ready to assemble the stiffness matrix for the problem. Since we want to enforce Dirichlet boundary conditions we construct a `DirichletBC` object and we use the `GetRegionNames` method from the Netgen mesh in order to map the label we have given when describing the geometry to the PETSc `DMPLEX` IDs. In particular if we look for the IDs of boundary element labeled either "line" or "curve" we would get::
+Note the code after the construction of the NonlinearVariationalProblem(). To use the AdaptiveMeshHierarchy with the existing Firedrake solver, we have to execute the intermediate lines before we call solver.solve(). 
+The AdaptiveTransferManager has to be set to the appctx and solver in order to use a multigrid solver.
+For the parameters of the multigrid solver, we will be using patch relaxation, which we define with ::
+   lu = {
+           "ksp_type": "preonly",
+           "pc_type": "lu"
+       }
+   assembled_lu = {
+           "ksp_type": "preonly",
+           "pc_type": "python",
+           "pc_python_type": "firedrake.AssembledPC",
+           "assembled": lu
+       }
+   def mg_params(relax, mat_type="aij"):
+       if mat_type == "aij":
+           coarse = lu
+       else:
+           coarse = assembled_lu
+   
+       return {
+           "mat_type": mat_type,
+           "ksp_type": "cg",
+           "pc_type": "mg",
+           "mg_levels": {
+               "ksp_type": "chebyshev",
+               "ksp_max_it": 1,
+               **relax
+           },
+           "mg_coarse": coarse
+       }
+   patch_relax = mg_params({
+   "pc_type": "python",
+   "pc_python_type": "firedrake.PatchPC",
+   "patch": {
+       "pc_patch": {
+           "construct_type": "star",
+           "construct_dim": 0,
+           "sub_mat_type": "seqdense",
+           "dense_inverse": True,
+           "save_operators": True,
+           "precompute_element_tensors": True},
+       "sub_ksp_type": "preonly",
+       "sub_pc_type": "lu"}},
+   mat_type="aij")
 
-   labels = [i+1 for i, name in enumerate(ngmsh.GetRegionNames(codim=1)) if name in ["line","curve"]]
-   bc = DirichletBC(V, 0, labels)
-   print(labels)
-
-We then proceed to solve the problem::
-
-   sol = Function(V)
-   solve(a == L, sol, bcs=bc)
-   VTKFile("output/Poisson.pvd").write(sol)
-
+For more information about patch relaxation, see `Using patch relaxation for multigrid <https://www.firedrakeproject.org/demos/poisson_mg_patches.py.html>`_.
 
 Adaptive Mesh Refinement
 -------------------------
-In this section we will discuss how to use the mesh refinement methods wrapped from Netgen C++ interface.
-In particular we will be considering a Laplace eigenvalue problem on the same PacMan domain presented above, i.e.:
+In this section we will discuss how to adaptively refine select elements and add the newly refined mesh into the AdaptiveMeshHierarchy.
+For this problem, we will be using the Babuška-Rheinbolt a-posteriori estimate for an element:
 
 .. math::
+   \eta_K^2 = h_K^2 \int_K | f + \nabla^2 u_h |^2 \mathrm{d}x + \frac{h_K}{2} \int_{\partial K \setminus \partial \Omega} \llbracket \nabla u_h \cdot n \rrbracket^2 \mathrm{d}s,
 
-   \text{Find } u \in H^1_0(\Omega) \text{ and } \lambda \in \mathbb{R} \text{ s.t. } \int_{\Omega} \nabla u\cdot\nabla v\;d\vec{x} = \lambda \int_{\Omega}uv\;d\vec{x}\qquad \forall v\in H^1_0(\Omega).
+where :math:`K` is the element, :math:`h_K` is the diameter of the element, :math:`n` is the normal, and :math:`\llbracket \cdot \rrbracket` is the jump operator. The a-posteriori estimator is computed using the solution at the current level :math:`h`. We can use a trick to compute the estimator on each element. We transform the above estimator into the variational problem 
 
-This script is based on a code developed by Professor Daniele Boffi and based on a code from Professor Douglas Arnold for the source problem.
-We begin by defining some quantities of interest such as the desired tolerance, the maximum number of iterations and the exact eigenvalue::
+.. math::
+   \int_\Omega \eta_K^2 w \mathrm{d}x = \int_\Omega \sum_K h_K^2 \int_K (f + \text{div} (\text{grad} u_h) )^2 \mathrm{d}x w \mathrm{d}x + \int_\Omega \sum_K \frac{h_K}{2} \int_{\partial K \setminus \partial \Omega} \llbracket \nabla u_h \cdot n \rrbracket^2 \mathrm{d}s w \mathrm{d}x
 
-   from firedrake.petsc import PETSc
-   from slepc4py import SLEPc
-   import numpy as np
+Our approach will be to compute the estimator over all elements and selectively choose to refine only those that contribute most to the error. To compute the error estimator, we use the function below to solve the variational formulation of the error estimator. Since our estimator is a constant per element, we use a DG0 function space.  ::
 
-   tolerance = 1e-16
+   def estimate_error(mesh, uh):
+       W = FunctionSpace(mesh, "DG", 0)
+       eta_sq = Function(W)
+       w = TestFunction(W)
+       f = Constant(1)
+       h = CellDiameter(mesh)  # symbols for mesh quantities
+       n = FacetNormal(mesh)
+       v = CellVolume(mesh)
+   
+       G = (  # compute cellwise error estimator
+             inner(eta_sq / v, w)*dx
+           - inner(h**2 * (f + div(grad(uh)))**2, w) * dx
+           - inner(h('+')/2 * jump(grad(uh), n)**2, w('+')) * dS
+           - inner(h('-')/2 * jump(grad(uh), n)**2, w('-')) * dS
+           )
+   
+       sp = {"mat_type": "matfree", "ksp_type": "richardson", "pc_type": "jacobi"}
+       solve(G == 0, eta_sq, solver_parameters=sp)
+       eta = Function(W).interpolate(sqrt(eta_sq))  # compute eta from eta^2
+   
+       with eta.dat.vec_ro as eta_:  # compute estimate for error in energy norm
+           error_est = sqrt(eta_.dot(eta_))
+       return (eta, error_est)
+
+The next step is to choose which elements to refine. For this we Dörfler marking, developed by Professor Willy Dörfler:  
+
+.. math::
+   \eta_K \geq \theta \text{max}_L \eta_L
+
+The logic is to select an element :math:`K` to refine if the estimator is greater than some factor :math:`\theta` of the maximum error estimate of the mesh, where :math:`\theta` ranges from 0 to 1. In our code we choose :math:`theta=0.5`. We implement this in the following function::
+
+   def adapt(mesh, eta):
+       W = FunctionSpace(mesh, "DG", 0)
+       markers = Function(W)
+   
+       # We decide to refine an element if its error indicator
+       # is within a fraction of the maximum cellwise error indicator
+   
+       # Access storage underlying our Function
+       # (a PETSc Vec) to get maximum value of eta
+       with eta.dat.vec_ro as eta_:
+           eta_max = eta_.max()[1]
+   
+       theta = 0.5
+       should_refine = conditional(gt(eta, theta*eta_max), 1, 0)
+       markers.interpolate(should_refine)
+   
+       refined_mesh = mesh.refine_marked_elements(markers)
+       return refined_mesh
+
+With these helper functions complete, we can solve the system iteratively. In the max_iterations is the number of total levels we want to perform multigrid on. We will solve for 10 levels. At every level :math:`l`, we first compute the solution using multigrid with patch relaxation up till level :math:`l`. We then use the current approximation of the solution to estimate the error across the mesh. Finally, we refine the mesh and repeat. ::
+
    max_iterations = 10
-   exact = 3.375610652693620492628**2
-
-We create a function to solve the eigenvalue problem using SLEPc. We begin initialising the `FunctionSpace`, the bilinear forms and linear functionals needed in the variational problem.
-Then a SLEPc Eigenvalue Problem Solver (`EPS`) is initialised and set up to use a shift and invert (`SINVERT`) spectral transformation where the preconditioner factorisation is computed using MUMPS::
-
-   def Solve(msh, labels):
-        V = FunctionSpace(msh, "CG", 2)
-        u = TrialFunction(V)
-        v = TestFunction(V)
-        a = inner(grad(u), grad(v))*dx
-        m = (u*v)*dx
-        uh = Function(V)
-        bc = DirichletBC(V, 0, labels)
-        A = assemble(a, bcs=bc)
-        M = assemble(m, bcs=bc, weight=0.)
-        Asc, Msc = A.M.handle, M.M.handle
-        E = SLEPc.EPS().create()
-        E.setType(SLEPc.EPS.Type.ARNOLDI)
-        E.setProblemType(SLEPc.EPS.ProblemType.GHEP)
-        E.setDimensions(1, SLEPc.DECIDE)
-        E.setOperators(Asc, Msc)
-        ST = E.getST()
-        ST.setType(SLEPc.ST.Type.SINVERT)
-        PC = ST.getKSP().getPC()
-        PC.setType("lu")
-        PC.setFactorSolverType("mumps")
-        E.setST(ST)
-        E.solve()
-        vr, vi = Asc.getVecs()
-        with uh.dat.vec_wo as vr:
-            lam = E.getEigenpair(0, vr, vi)
-        return (lam, uh, V)
-
-We will also need a function that mark the elements that need to be marked according to an error indicator, i.e.
-
-.. math::
-   \eta = \sum_{K\in \mathcal{T}_h(\Omega)} h^2\int_K|\lambda u_h + \Delta u_h|^2\;d\vec{x}+\frac{h}{2}\int_{E\subset \partial K} | [\![ \nabla u\cdot n_E]\!] | ^2\; ds
-
-In order to do so we begin by computing the value of the indicator using a piecewise constant function space::
-
-   def Mark(msh, uh, lam):
-      W = FunctionSpace(msh, "DG", 0)
-      eta_sq = Function(W)
-      w = TestFunction(W)
-      f = Constant(1)
-      h = CellDiameter(msh)  # symbols for mesh quantities
-      n = FacetNormal(msh)
-      v = CellVolume(msh)
-
-      G = (  # compute cellwise error estimator
-            inner(eta_sq / v, w)*dx
-          - inner(h**2 * (f + div(grad(uh)))**2, w) * dx
-          - inner(h('+')/2 * jump(grad(uh), n)**2, w('+')) * dS
-          - inner(h('-')/2 * jump(grad(uh), n)**2, w('-')) * dS
-          )
-
-      # Each cell is an independent 1x1 solve, so Jacobi is exact
-      sp = {"mat_type": "matfree", "ksp_type": "richardson", "pc_type": "jacobi"}
-      solve(G == 0, eta_sq, solver_parameters=sp)
-      eta = Function(W).interpolate(sqrt(eta_sq))  # compute eta from eta^2
-
-      with eta.dat.vec_ro as eta_:  # compute estimate for error in energy norm
-          error_est = sqrt(eta_.dot(eta_))
-      markers = Function(W)
-
-      # We decide to refine an element if its error indicator
-      # is within a fraction of the maximum cellwise error indicator
-
-      # Access storage underlying our Function
-      # (a PETSc Vec) to get maximum value of eta
-      with eta.dat.vec_ro as eta_:
-          eta_max = eta_.max()[1]
-
-      theta = 0.5
-      should_refine = conditional(gt(eta, theta*eta_max), 1, 0)
-      markers.interpolate(should_refine)
-      return markers
-
-It is now time to define the solve, mark and refine loop that is at the heart of the adaptive method described here::
-
-
+   error_estimators = []
+   dofs = []
    for i in range(max_iterations):
-        print("level {}".format(i))
-        lam, uh, V = Solve(msh, labels)
-        mark = Mark(msh, uh, lam)
-        msh = msh.refine_marked_elements(mark)
-        VTKFile("output/AdaptiveMeshRefinement.pvd").write(uh)
+       print(f"level {i}")
+   
+       uh = solve_poisson(mesh, patch_relax)
+       VTKFile(f"output/poisson_l/{max_iterations}/adaptive_loop_{i}.pvd").write(uh)
+   
+       (eta, error_est) = estimate_error(mesh, uh)
+       VTKFile(f"output/poisson_l/{max_iterations}/eta_{i}.pvd").write(eta)
+   
+       print(f"  ||u - u_h|| <= C x {error_est}")
+       error_estimators.append(error_est)
+       dofs.append(uh.function_space().dim())
+   
+       mesh = adapt(mesh, eta)
+       if i != max_iterations - 1:
+           amh.add_mesh(mesh)
 
-Note that the mesh conforms to the CAD geometry as it is adaptively refined.
+To add the mesh to the AdaptiveMeshHierarchy, we us the amh.add_mesh() method. In this method the input is the refined mesh. There is another method for adding a mesh to the hierarchy. This is the amh.refine([to_refine]). In this method, to_refine is a list of 1's or 0's, where a 1 at index i means the elements[i] should be refined. It is important to note that this method assumes the input list considers the elements in the order than Netgen enumerates them, not Firedrake. This enumeration can be found with ::
 
+   for l, el in enumerate(ngmesh.Elements2D()):
+
+or alternatively ::
+
+   for l, el in enumerate(mesh.netgen_mesh.Elements2D()):
+
+for 2D elements for example. The convergence of the  
 
 .. figure:: Adaptive.png
    :align: center
