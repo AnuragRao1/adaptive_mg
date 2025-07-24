@@ -218,10 +218,10 @@ The meshes now refine according to the error estimator. The error estimators lev
 +-------------------------------+-------------------------------+-------------------------------+
 | .. figure:: eta_l3.png        | .. figure:: eta_l6.png        | .. figure:: eta_l15.png       |
 |    :align: center             |    :align: center             |    :align: center             |
-|    :width: 100%               |    :width: 100%               |    :width: 100%               |
+|    :height: 250px             |    :height: 250px             |    :height: 250px             |
 |    :alt: Eta at level 3       |    :alt: Eta at level 6       |    :alt: Eta at level 15      |
 |                               |                               |                               |
-|    *Level 3*                  |     *Level 6*                 |    *Level 15*                 |
+|    *Level 3*                  |    *Level 6*                  |    *Level 15*                 |
 +-------------------------------+-------------------------------+-------------------------------+
 
 The solutions at level 4 and 15 are shown below.
@@ -229,7 +229,7 @@ The solutions at level 4 and 15 are shown below.
 +------------------------------------+------------------------------------+
 | .. figure:: solution_l4.png        | .. figure:: solution_l15.png       |
 |    :align: center                  |    :align: center                  |
-|    :width: 90%                     |    :width: 90%                     |
+|    :height: 300px                  |    :height: 300px                  |
 |    :alt: Solution, level 4         |    :alt: Solution, level 15        |
 |                                    |                                    |
 |    *MG solution at level 4*        |    *MG solution at level 15*       |
