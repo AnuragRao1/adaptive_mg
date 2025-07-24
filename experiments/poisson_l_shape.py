@@ -1,5 +1,11 @@
 from firedrake import *
 from netgen.occ import *
+
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from adaptive import AdaptiveMeshHierarchy
+from adaptive_transfer_manager import AdaptiveTransferManager
 from adaptive import AdaptiveMeshHierarchy
 from adaptive_transfer_manager import AdaptiveTransferManager
 from firedrake.mg.ufl_utils import coarsen
@@ -81,14 +87,12 @@ rect2 = WorkPlane(Axes((0,1,0), n=Z, h=X)).Rectangle(2,1).Face()
 L = rect1 + rect2
 
 geo = OCCGeometry(L, dim=2)
-ngmsh = geo.GenerateMesh(maxh=0.1)
+ngmsh = geo.GenerateMesh(maxh=0.5)
 mesh = Mesh(ngmsh)
 mesh2 = Mesh(ngmsh)
 amh = AdaptiveMeshHierarchy([mesh])
 atm = AdaptiveTransferManager()
 
-mh = MeshHierarchy(mesh2, 9)
-tm = TransferManager()
 
 lu = {
         "ksp_type": "preonly",
@@ -132,7 +136,7 @@ patch_relax = mg_params({
     "sub_pc_type": "lu"}},
 mat_type="aij")
 
-max_iterations = 15
+max_iterations = 10
 error_estimators = []
 dofs = []
 for i in range(max_iterations):

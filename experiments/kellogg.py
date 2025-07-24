@@ -17,7 +17,7 @@ from adaptive_transfer_manager import AdaptiveTransferManager
 
     
 def run_system(p=2, theta=0.5, lam_alg=0.01, max_iterations=10):
-    def solve_kellogg(mesh, p, u_prev, u_real, params):
+    def solve_kellogg(mesh, p, u_prev, u_real, params, uniform):
         V = FunctionSpace(mesh, "CG", p)
         uh = u_prev
         v = TestFunction(V)
@@ -27,20 +27,21 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, max_iterations=10):
         a = Function(V)
         x = SpatialCoordinate(mesh)
         # a.interpolate(conditional(x[0] * x[1] < 0, Constant(1.0), Constant(161.4476387975881)))
-        a = conditional(x[0] * x[1] < 0, Constant(1.0), Constant(161.4476387975881)) # Leaving in this format resolves divergence of solver
+        a = conditional(lt(x[0] * x[1], 0), Constant(1.0), Constant(161.4476387975881)) # Leaving in this format resolves divergence of solver
         F = inner(a * grad(uh), grad(v))*dx # f == 0, 
         
         problem = NonlinearVariationalProblem(F, uh, bc)
 
-        dm = uh.function_space().dm
-        old_appctx = get_appctx(dm)
-        mat_type = params["mat_type"]
-        appctx = _SNESContext(problem, mat_type, mat_type, old_appctx)
-        appctx.transfer_manager = atm
-        solver = NonlinearVariationalSolver(problem, solver_parameters=params)
-        solver.set_transfer_manager(atm)
-        with dmhooks.add_hooks(dm, solver, appctx=appctx, save=False):
-            coarsen(problem, coarsen)
+        if not uniform:
+            dm = uh.function_space().dm
+            old_appctx = get_appctx(dm)
+            mat_type = params["mat_type"]
+            appctx = _SNESContext(problem, mat_type, mat_type, old_appctx)
+            appctx.transfer_manager = atm
+            solver = NonlinearVariationalSolver(problem, solver_parameters=params)
+            solver.set_transfer_manager(atm)
+            with dmhooks.add_hooks(dm, solver, appctx=appctx, save=False):
+                coarsen(problem, coarsen)
 
         solver.solve()
         return uh
@@ -56,7 +57,7 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, max_iterations=10):
         v = CellVolume(mesh)
 
         x = SpatialCoordinate(mesh)
-        a = conditional(x[0] * x[1] < 0, 1.0, 161.4476387975881)
+        a = conditional(lt(x[0] * x[1], 0), Constant(1.0), Constant(161.4476387975881))
         a = Function(W).interpolate(a)
 
         G = (
@@ -77,7 +78,7 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, max_iterations=10):
         solve(G == 0, eta_sq, solver_parameters=sp)
         
         eta = Function(W).interpolate(sqrt(eta_sq))  # compute eta from eta^2
-        VTKFile(f"output/kellogg/{theta}_{lam_alg}_levels={max_iterations}/{p}/eta_{level}.pvd").write(eta)
+        VTKFile(f"output/kellogg/theta={theta}_lam={lam_alg}_levels={max_iterations}/{p}/eta_{level}.pvd").write(eta)
 
 
         with eta.dat.vec_ro as eta_:  # compute estimate for error in energy norm
@@ -109,20 +110,20 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, max_iterations=10):
 
         r = sqrt(x**2 + y**2)
         phi = atan2(y, x)
-        phi = conditional(phi < 0, phi + 2 * pi, phi) # map to [0 , 2pi]
+        phi = conditional(lt(phi, 0), phi + 2 * pi, phi) # map to [0 , 2pi]
 
         alpha = Constant(0.1)
         beta = Constant(-14.92256510455152)
         delta = Constant(pi / 4)
 
         mu = conditional(
-            phi < pi/2,
+            lt(phi, pi/2),
             cos((pi/2 - beta) * alpha) * cos((phi - pi/2 + delta) * alpha),
             conditional(
-                phi < pi,
+                lt(phi, pi),
                 cos(delta * alpha) * cos((phi - pi + beta) * alpha),
                 conditional(
-                    phi < 3*pi/2,
+                    lt(phi, 3*pi/2),
                     cos(beta * alpha) * cos((phi - pi - delta) * alpha),
                     cos((pi/2 - delta) * alpha) * cos((phi - 3*pi/2 - beta) * alpha)
                 )
@@ -139,12 +140,13 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, max_iterations=10):
     square = wp.Rectangle(2.0,2.0).Face()
     square = square.Move(Vec(-1.0, -1.0, 0))
     geo = OCCGeometry(square, dim=2)
-    ngmsh = geo.GenerateMesh(maxh=2) 
+    ngmsh = geo.GenerateMesh(maxh=1) 
     mesh = Mesh(ngmsh)
     amh = AdaptiveMeshHierarchy([mesh])
     atm = AdaptiveTransferManager()
     tm = TransferManager()
-
+    
+    
 
     # ESTABLISH SOLVER PARAMS
     lu = {
@@ -197,49 +199,73 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, max_iterations=10):
     jacobi_relax = mg_params({"pc_type": "jacobi"}, mat_type="matfree")
 
     # ITERATIVE LOOP
+
     max_iterations = max_iterations
+
+    uniform = False
+    if uniform:
+        mesh2 = Mesh(ngmsh)
+        mh = MeshHierarchy(mesh2, 9)
+
     error_estimators = {i: [] for i in range(max_iterations)}
     true_errors = []
     dofs = []
     k_l = []
     times = []
     start_time = time.time()
+    times.append(start_time)
     for level in range(max_iterations):
+        if uniform:
+            mesh = mh[level]
+
         print(f"level {level}")
-        V = FunctionSpace(amh[-1], "CG", p)
+        V = FunctionSpace(mesh, "CG", p)
         uh = Function(V, name="solution")
         u_prev = Function(V, name="u_prev")
         
         if level > 0:
-            tm.prolong(u_k, uh)       
+            # start = time.time()
+            tm.prolong(u_k, uh)
+            # print("TIME TO PROLONG: ", time.time() - start)      
 
         k = 0
         error_est = 0
-        u_real = generate_u_real(amh[-1], p)
+
+        # start = time.time()
+        u_real = generate_u_real(mesh, p)        
+        # print("TIME TO GENERATE REAL U: ", time.time() - start)
 
         while norm(uh - u_prev) > lam_alg * error_est or k == 0:
             k += 1
             u_prev.interpolate(uh)
-            uh = solve_kellogg(amh[-1], p, uh, u_real, patch_relax)
+            # start = time.time()
+            uh = solve_kellogg(mesh, p, uh, u_real, jacobi_relax, uniform)
+            # print("TIME TO SOLVE KELLOGG: ", time.time() - start)
 
-            (eta, error_est) = estimate_error(amh[-1], uh, u_real) 
+            # start = time.time()
+            (eta, error_est) = estimate_error(mesh, uh, u_real) 
+            # print("TIME TO ESTIMATE ERROR: ", time.time() - start)
             print("ERROR ESTIMATE: ", error_est)
 
             error_estimators[level].append(error_est)
 
         u_k = Function(V).interpolate(uh)
-        VTKFile(f"output/kellogg/{theta}_{lam_alg}_levels={max_iterations}/{p}/{level}_{k}.pvd").write(uh)
+        VTKFile(f"output/kellogg/theta={theta}_lam={lam_alg}_levels={max_iterations}/{p}/{level}_{k}.pvd").write(uh)
         k_l.append(k)
         dofs.append(uh.function_space().dim())
 
         err_real = norm(u_k - u_real)
         print("TRUE ERROR: ", err_real)
         true_errors.append(err_real)
-        mesh = adapt(amh[-1], eta)
-        if level != max_iterations - 1:
-            amh.add_mesh(mesh)
+        # start = time.time()
+        if not uniform:
+            mesh = adapt(mesh, eta)
+            if level != max_iterations - 1:
+                amh.add_mesh(mesh)
+        # print("TIME TO REFINE/ADD MESH: ", time.time() - start)
         
-        times.append(time.time() - start_time)
+        times.append(time.time())
+        print("TIME FOR LEVEL: ", times[-1] - times[-2])
     print("TIMES FOR LEVELS: ", times)
 
     final_errors = [error_estimators[key][-1] for key in error_estimators]
@@ -291,7 +317,7 @@ if __name__ == "__main__":
     # plt.ylabel(r"Estimated energy norm $\sqrt{\sum_K \eta_K^2}$")
     # plt.legend()
     # plt.title("Estimated Error Convergence")
-    # plt.savefig(f"output/kellogg/{theta}_{lambda_alg}_levels={levels}/adaptive_convergence_est.png")
+    # plt.savefig(f"output/kellogg/theta={theta}_lam={lambda_alg}_levels={levels}/adaptive_convergence_est.png")
 
 
     # plt.figure(figsize=(8, 6))
@@ -303,7 +329,7 @@ if __name__ == "__main__":
     # plt.ylabel(r"True error norm $\|u - u_h\|$")
     # plt.legend()
     # plt.title("True Error Convergence")
-    # plt.savefig(f"output/kellogg/{theta}_{lambda_alg}_levels={levels}/adaptive_convergence_true.png")
+    # plt.savefig(f"output/kellogg/theta={theta}_lam={lambda_alg}_levels={levels}/adaptive_convergence_true.png")
 
     # plt.show()
 
@@ -311,9 +337,9 @@ if __name__ == "__main__":
     #### SINGLE SAMPLE
     p = 1
     (dofs, errors_est, errors_true) = run_system(p, theta, lambda_alg, levels)
-    np.save(f"output/kellogg/{theta}_{lambda_alg}_levels={levels}/{p}/dofs.npy", dofs)
-    np.save(f"output/kellogg/{theta}_{lambda_alg}_levels={levels}/{p}/errors_estimator.npy", errors_est)
-    np.save(f"output/kellogg/{theta}_{lambda_alg}_levels={levels}/{p}/errors_true.npy", errors_true)
+    np.save(f"output/kellogg/theta={theta}_lam={lambda_alg}_levels={levels}/{p}/dofs.npy", dofs)
+    np.save(f"output/kellogg/theta={theta}_lam={lambda_alg}_levels={levels}/{p}/errors_estimator.npy", errors_est)
+    np.save(f"output/kellogg/theta={theta}_lam={lambda_alg}_levels={levels}/{p}/errors_true.npy", errors_true)
 
 
 
@@ -321,15 +347,15 @@ if __name__ == "__main__":
    
     plt.figure(figsize=(8, 6))
     plt.grid(True)
-    plt.loglog(dofs, errors_est, '-ok')
-    scaling = errors_est[0] / dofs[0]**-0.5
-    plt.loglog(dofs, scaling * dofs**-0.5, '--k', alpha=0.3)
-    scaling = errors_est[0] / dofs[0]**-0.1
-    plt.loglog(dofs, scaling * dofs**-0.1, '--k', alpha = 0.3)
-    scaling = errors_est[0] / dofs[0]**-1
-    plt.loglog(dofs, scaling * dofs**-1, '--k', alpha = 0.3)
-    scaling = errors_est[0] / dofs[0]**-2
-    plt.loglog(dofs, scaling * dofs**-2, '--k', alpha = 0.3)
+    plt.loglog(dofs[1:], errors_est[1:], '-ok')
+    scaling = errors_est[1] / dofs[1]**-0.5
+    plt.loglog(dofs, scaling * dofs**-0.5, '--', alpha=0.5, color="lightcoral", label="x^{-0.5}")
+    scaling = errors_est[1] / dofs[1]**-0.1
+    plt.loglog(dofs, scaling * dofs**-0.1, '--', alpha = 0.5, color='lawngreen', label = "x^{-0.1}")
+    scaling = errors_est[1] / dofs[1]**-1
+    plt.loglog(dofs, scaling * dofs**-1, '--', alpha = 0.5, color = 'aqua', label = "x^{-1}")
+    scaling = errors_est[1] / dofs[1]**-2
+    plt.loglog(dofs, scaling * dofs**-2, '--', alpha = 0.5, color = 'indigo', label = "x^{-2}")
 
 
 
@@ -337,17 +363,18 @@ if __name__ == "__main__":
     plt.xlabel("Number of degrees of freedom")
     plt.ylabel(r"Estimated energy norm $\sqrt{\sum_K \eta_K^2}$")
     plt.title(f"Estimated Error Convergence p={p}")
-    plt.savefig(f"output/kellogg/{theta}_{lambda_alg}_levels={levels}/{p}/adaptive_convergence_est.png")
+    plt.legend()
+    plt.savefig(f"output/kellogg/theta={theta}_lam={lambda_alg}_levels={levels}/{p}/adaptive_convergence_est.png")
 
 
     plt.figure(figsize=(8, 6))
     plt.grid(True)
-    plt.loglog(dofs, errors_true, '-.')
+    plt.loglog(dofs[1:], errors_true[1:], '-.')
 
     plt.xlabel("Number of degrees of freedom")
     plt.ylabel(r"True error norm $\|u - u_h\|$")
     plt.title(f"True Error Convergence p={p}")
 
-    plt.savefig(f"output/kellogg/{theta}_{lambda_alg}_levels={levels}/{p}/adaptive_convergence_true.png")
+    plt.savefig(f"output/kellogg/theta={theta}_lam={lambda_alg}_levels={levels}/{p}/adaptive_convergence_true.png")
 
     plt.show()
