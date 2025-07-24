@@ -57,18 +57,25 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, max_iterations=10):
 
         x = SpatialCoordinate(mesh)
         a = conditional(x[0] * x[1] < 0, 1.0, 161.4476387975881)
+        a = Function(W).interpolate(a)
 
         G = (
             inner(eta_sq / v, w) * dx 
             - inner(v * div(a * grad(uh))**2, w) * dx 
             - inner(v('+')**0.5 * jump(a * grad(uh), n)**2, w('+')) * dS
             - inner(v('-')**0.5 * jump(a * grad(uh), n)**2, w('-')) * dS
-            #- inner(v ** 0.5 * (u_deriv - proj_u_deriv)**2, w) * ds
             - inner(v**0.5 * dot(grad(u_boundary - uh), t)**2, w) * ds
             )
-
+        
+        eta_vol = assemble(inner(v * div(a * grad(uh))**2, w) * dx)
+        eta_jump = assemble(inner(v('+')**0.5 * jump(a * grad(uh), n)**2, w('+')) * dS
+            + inner(v('-')**0.5 * jump(a * grad(uh), n)**2, w('-')) * dS)
+        eta_boundary = assemble(inner(v**0.5 * dot(grad(u_boundary - uh), t)**2, w) * ds)
+        print(W.dim(), sqrt(sum(eta_vol.dat.data)), sqrt(sum(eta_jump.dat.data)), sqrt(sum(eta_boundary.dat.data)))
+        
         sp = {"mat_type": "matfree", "ksp_type": "richardson", "pc_type": "jacobi"}
         solve(G == 0, eta_sq, solver_parameters=sp)
+        
         eta = Function(W).interpolate(sqrt(eta_sq))  # compute eta from eta^2
         VTKFile(f"output/kellogg/{theta}_{lam_alg}_levels={max_iterations}/{p}/eta_{level}.pvd").write(eta)
 
@@ -132,7 +139,7 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, max_iterations=10):
     square = wp.Rectangle(2.0,2.0).Face()
     square = square.Move(Vec(-1.0, -1.0, 0))
     geo = OCCGeometry(square, dim=2)
-    ngmsh = geo.GenerateMesh(maxh=1) 
+    ngmsh = geo.GenerateMesh(maxh=2) 
     mesh = Mesh(ngmsh)
     amh = AdaptiveMeshHierarchy([mesh])
     atm = AdaptiveTransferManager()
@@ -236,7 +243,7 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, max_iterations=10):
     print("TIMES FOR LEVELS: ", times)
 
     final_errors = [error_estimators[key][-1] for key in error_estimators]
-    return dofs, final_errors, true_errors
+    return np.array(dofs, dtype=float), np.array(final_errors), np.array(true_errors)
 
     
 
@@ -249,7 +256,7 @@ if __name__ == "__main__":
 
     theta = 0.5
     lambda_alg = 0.01
-    levels = 25
+    levels = 20
 
 
     # errors_true = {}
@@ -302,12 +309,30 @@ if __name__ == "__main__":
 
 
     #### SINGLE SAMPLE
-    p = 2
+    p = 1
     (dofs, errors_est, errors_true) = run_system(p, theta, lambda_alg, levels)
+    np.save(f"output/kellogg/{theta}_{lambda_alg}_levels={levels}/{p}/dofs.npy", dofs)
+    np.save(f"output/kellogg/{theta}_{lambda_alg}_levels={levels}/{p}/errors_estimator.npy", errors_est)
+    np.save(f"output/kellogg/{theta}_{lambda_alg}_levels={levels}/{p}/errors_true.npy", errors_true)
+
+
+
+
    
     plt.figure(figsize=(8, 6))
     plt.grid(True)
     plt.loglog(dofs, errors_est, '-ok')
+    scaling = errors_est[0] / dofs[0]**-0.5
+    plt.loglog(dofs, scaling * dofs**-0.5, '--k', alpha=0.3)
+    scaling = errors_est[0] / dofs[0]**-0.1
+    plt.loglog(dofs, scaling * dofs**-0.1, '--k', alpha = 0.3)
+    scaling = errors_est[0] / dofs[0]**-1
+    plt.loglog(dofs, scaling * dofs**-1, '--k', alpha = 0.3)
+    scaling = errors_est[0] / dofs[0]**-2
+    plt.loglog(dofs, scaling * dofs**-2, '--k', alpha = 0.3)
+
+
+
 
     plt.xlabel("Number of degrees of freedom")
     plt.ylabel(r"Estimated energy norm $\sqrt{\sum_K \eta_K^2}$")
