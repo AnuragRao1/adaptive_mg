@@ -19,10 +19,15 @@ We begin with the L-shaped domain, which we build as the union of two rectangles
   L = rect1 + rect2
   
   geo = OCCGeometry(L, dim=2)
-  ngmsh = geo.GenerateMesh(maxh=0.1)
+  ngmsh = geo.GenerateMesh(maxh=0.5)
   mesh = Mesh(ngmsh)
 
-It is important to convert the initial Netgen mesh into a Firedrake mesh before constructing the AdaptiveMeshHierarchy. To call the constructor to the hierarchy, we must pass the initial mesh as a list. 
+It is important to convert the initial Netgen mesh into a Firedrake mesh before constructing the AdaptiveMeshHierarchy. To call the constructor to the hierarchy, we must pass the initial mesh as a list. Our initial mesh looks like this:
+
+.. figure:: initial_mesh.png
+   :align: center
+   :alt: Initial mesh.
+
 We will also initialize the AdaptiveTransferManager here: ::
   
   amh = AdaptiveMeshHierarchy([mesh])
@@ -106,7 +111,12 @@ For the parameters of the multigrid solver, we will be using patch relaxation, w
        "sub_pc_type": "lu"}},
    mat_type="aij")
 
-For more information about patch relaxation, see `Using patch relaxation for multigrid <https://www.firedrakeproject.org/demos/poisson_mg_patches.py.html>`_.
+For more information about patch relaxation, see `Using patch relaxation for multigrid <https://www.firedrakeproject.org/demos/poisson_mg_patches.py.html>`_. The initial solution is shown below
+
+.. figure:: solution_l1.png
+   :align: center
+   :alt: Initial Solution from multigrid with initial mesh.
+
 
 Adaptive Mesh Refinement
 -------------------------
@@ -173,9 +183,9 @@ The logic is to select an element :math:`K` to refine if the estimator is greate
        refined_mesh = mesh.refine_marked_elements(markers)
        return refined_mesh
 
-With these helper functions complete, we can solve the system iteratively. In the max_iterations is the number of total levels we want to perform multigrid on. We will solve for 10 levels. At every level :math:`l`, we first compute the solution using multigrid with patch relaxation up till level :math:`l`. We then use the current approximation of the solution to estimate the error across the mesh. Finally, we refine the mesh and repeat. ::
+With these helper functions complete, we can solve the system iteratively. In the max_iterations is the number of total levels we want to perform multigrid on. We will solve for 15 levels. At every level :math:`l`, we first compute the solution using multigrid with patch relaxation up till level :math:`l`. We then use the current approximation of the solution to estimate the error across the mesh. Finally, we refine the mesh and repeat. ::
 
-   max_iterations = 10
+   max_iterations = 15
    error_estimators = []
    dofs = []
    for i in range(max_iterations):
@@ -199,102 +209,36 @@ To add the mesh to the AdaptiveMeshHierarchy, we us the amh.add_mesh() method. I
 
    for l, el in enumerate(ngmesh.Elements2D()):
 
-or alternatively ::
+or alternatively to access it from the Firedrake mesh, ::
 
    for l, el in enumerate(mesh.netgen_mesh.Elements2D()):
 
-for 2D elements for example. The convergence of the  
+The meshes now refine according to the error estimator. The error estimators levels 3,5, and 15 are shown below. Zooming into the vertex of the L at level 15 shows the error indicator remains strongest there. Further refinements will focus on that area.
 
-.. figure:: Adaptive.png
++-------------------------------+-------------------------------+-------------------------------+
+| .. figure:: eta_l3.png        | .. figure:: eta_l6.png        | .. figure:: eta_l15.png       |
+|    :align: center             |    :align: center             |    :align: center             |
+|    :width: 100%               |    :width: 100%               |    :width: 100%               |
+|    :alt: Eta at level 3       |    :alt: Eta at level 6       |    :alt: Eta at level 15      |
+|                               |                               |                               |
+|    *Level 3*                  |     *Level 6*                 |    *Level 15*                 |
++-------------------------------+-------------------------------+-------------------------------+
+
+The solutions at level 4 and 15 are shown below.
+
++------------------------------------+------------------------------------+
+| .. figure:: solution_l4.png        | .. figure:: solution_l15.png       |
+|    :align: center                  |    :align: center                  |
+|    :width: 90%                     |    :width: 90%                     |
+|    :alt: Solution, level 4         |    :alt: Solution, level 15        |
+|                                    |                                    |
+|    *MG solution at level 4*        |    *MG solution at level 15*       |
++------------------------------------+------------------------------------+
+
+
+The convergence follows the expected behavior:
+
+.. figure:: adaptive_convergence_9.png
    :align: center
-   :alt: Outcome of the adaptive mesh refinement process.
+   :alt: Convergence of the error estimator.
 
-Constructive Solid Geometry in 3D
----------------------------------
-In this section we will focus our attention on three dimensional constructive solid geometry. In particular we will look at the operators `+,-,*~`, which have been overridden to have a special meaning when applied to two instances of the class `CSGeometry`.
-It is important to notice that the same operators can be used also when working with a `SplineGeometry` and their action will have the same meaning that is presented here.
-The `+,-,*` operators have respectively the meaning of union, set difference, and intersection. We will build a cube using the planes intersection and remove from it a portion of sphere::
-
-   from netgen.csg import *
-   left = Plane(Pnt(0, 0, 0), Vec(-1, 0, 0))
-   right = Plane(Pnt(1, 1, 1), Vec(1, 0, 0))
-   front = Plane(Pnt(0, 0, 0), Vec(0, -1, 0))
-   back = Plane(Pnt(1, 1, 1), Vec(0, 1, 0))
-   bot = Plane(Pnt(0, 0, 0), Vec(0, 0, -1))
-   top = Plane(Pnt(1, 1, 1), Vec(0, 0, 1))
-   cube = left * right * front * back * bot * top
-   cube.bc("cube")
-   sphere = Sphere(Pnt(0.6, 0.6, 0.6), 0.5)
-   geo = CSGeometry()
-   geo.Add(cube-sphere)
-   ngmsh = geo.GenerateMesh(maxh=0.1)
-   msh = Mesh(ngmsh)
-   VTKFile("output/MeshExample3.pvd").write(msh)
-
-
-Open Cascade Technology
------------------------
-Last we will have a look at the Netgen Open Cascade Technology interface, which has been recently included. We will follow the tutorial presented in the `NetGen docs <https://docu.ngsolve.org/nightly/i-tutorials/unit-4.4-occ/bottle.html>`__, which itself comes from the OCCT tutorial `here <https://dev.opencascade.org/doc/overview/html/occt__tutorial.html>`__.
-The idea is to draw a "flask" using the OCCT interface and solve the linear elasticity equations to compute the stress tensor on the flask subject to gravity.
-We begin importing the Netgen Open Cascade interface and constructing the bottom of the flask using many different method such as `Axes, Face, Pnt, Segment, ...` (all the details this methods can be found in `NetGen docs <https://docu.ngsolve.org/nightly/i-tutorials/unit-4.4-occ/bottle.html>`__
-
-::
-
-   from netgen.occ import *
-   myHeight = 70
-   myWidth = 50
-   myThickness = 30
-   pnt1 = Pnt(-myWidth / 2., 0, 0)
-   pnt2 = Pnt(-myWidth / 2., -myThickness / 4., 0)
-   pnt3 = Pnt(0, -myThickness / 2., 0)
-   pnt4 = Pnt(myWidth / 2., -myThickness / 4., 0)
-   pnt5 = Pnt(myWidth / 2., 0, 0)
-   seg1 = Segment(pnt1, pnt2)
-   arc = ArcOfCircle(pnt2, pnt3, pnt4)
-   seg2 = Segment(pnt4, pnt5)
-   wire = Wire([seg1, arc, seg2])
-   mirrored_wire = wire.Mirror(Axis((0, 0, 0), X))
-   w = Wire([wire, mirrored_wire])
-   f = Face(w)
-   f.bc("bottom")
-
-Once the bottom part of the flask has been constructed we then extrude it to create the main body. We now construct the neck of the flask and fuse it with the main body::
-
-   body = f.Extrude(myHeight*Z)
-   body = body.MakeFillet(body.edges, myThickness / 12.0)
-   neckax = Axes(body.faces.Max(Z).center, Z)
-   myNeckRadius = myThickness / 4.0
-   myNeckHeight = myHeight / 10
-   neck = Cylinder(neckax, myNeckRadius, myNeckHeight)
-   body = body + neck
-   fmax = body.faces.Max(Z)
-   thickbody = body.MakeThickSolid([fmax], -myThickness / 50, 1.e-3)
-
-Last we are left to construct the threading of the flask neck and fuse it to the rest of the flask body. In order to do this we are going to need the value of pi, which we grab from the Python math package::
-
-   import math
-   cyl1 = Cylinder(neckax, myNeckRadius * 0.99, 1).faces[0]
-   cyl2 = Cylinder(neckax, myNeckRadius * 1.05, 1).faces[0]
-   aPnt = Pnt(2 * math.pi, myNeckHeight / 2.0)
-   aDir = Dir(2 * math.pi, myNeckHeight / 4.0)
-   anAx2d = gp_Ax2d(aPnt, aDir)
-   aMajor = 2 * math.pi
-   aMinor = myNeckHeight / 10
-   arc1 = Ellipse(anAx2d, aMajor, aMinor).Trim(0, math.pi)
-   arc2 = Ellipse(anAx2d, aMajor, aMinor/4).Trim(0, math.pi)
-   seg = Segment(arc1.start, arc1.end)
-   wire1 = Wire([Edge(arc1, cyl1), Edge(seg, cyl1)])
-   wire2 = Wire([Edge(arc2, cyl2), Edge(seg, cyl2)])
-   threading = ThruSections([wire1, wire2])
-   bottle = thickbody + threading
-   geo = OCCGeometry(bottle)
-
-As usual, we generate a mesh for the described geometry and use the Firedrake-Netgen interface to import as a PETSc DMPLEX::
-
-   ngmsh = geo.GenerateMesh(maxh=5)
-   msh = Mesh(ngmsh)
-   VTKFile("output/MeshExample4.pvd").write(msh)
-
-.. figure:: Bottle.png
-   :align: center
-   :alt: Example of the mesh generated from a bottle geometry described using Open Cascade.
