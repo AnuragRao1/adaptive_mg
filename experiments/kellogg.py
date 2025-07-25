@@ -197,6 +197,10 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, max_iterations=10):
     "pc_star_backend_type": "tinyasm"})
 
     jacobi_relax = mg_params({"pc_type": "jacobi"}, mat_type="matfree")
+    chol = {"mat_type": "aij",
+            "ksp_type": "preonly",
+            "pc_type": "cholesky",
+            "pc_factor_mat_solver_type": "mumps"}
 
     # ITERATIVE LOOP
 
@@ -239,7 +243,7 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, max_iterations=10):
             k += 1
             u_prev.interpolate(uh)
             # start = time.time()
-            uh = solve_kellogg(mesh, p, uh, u_real, jacobi_relax, uniform)
+            uh = solve_kellogg(mesh, p, uh, u_real, chol, uniform)
             # print("TIME TO SOLVE KELLOGG: ", time.time() - start)
 
             # start = time.time()
