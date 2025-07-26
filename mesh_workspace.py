@@ -117,13 +117,13 @@ from firedrake.mg.utils import get_level
 # EXAMPLE 3
 import random
 random.seed(1234)
-# wp = WorkPlane()
-# wp.Rectangle(2,2)
-# face = wp.Face()
-# geo = OCCGeometry(face, dim=2)
-cube = Box(Pnt(0,0,0), Pnt(2,2,2))
-geo = OCCGeometry(cube, dim=3)
-maxh = 2
+wp = WorkPlane()
+wp.Rectangle(2,2)
+face = wp.Face()
+geo = OCCGeometry(face, dim=2)
+# cube = Box(Pnt(0,0,0), Pnt(2,2,2))
+# geo = OCCGeometry(cube, dim=3)
+maxh = 1
 ngmesh = geo.GenerateMesh(maxh=maxh)
 mesh = Mesh(ngmesh)
 mesh2 = Mesh(ngmesh)
@@ -132,17 +132,17 @@ amh = AdaptiveMeshHierarchy([mesh])
 
 for i in range(1):
     # for_ref = np.zeros((len(ngmesh.Elements2D())))
-    for l, el in enumerate(ngmesh.Elements3D()):
-        el.refine = 0
-        # if random.random() < 0.05:
-        #     print(l)
-        #     el.refine = 1
-    el.refine = 1
-    #         # for_ref[l] = 1
-    # for l, el in enumerate(ngmesh.Elements2D()):
+    # for l, el in enumerate(ngmesh.Elements3D()):
     #     el.refine = 0
-    #     if random.random() < 0.1:
-    #         el.refine = 1
+    #     # if random.random() < 0.05:
+    #     #     print(l)
+    #     #     el.refine = 1
+    # el.refine = 1
+    #         # for_ref[l] = 1
+    for l, el in enumerate(ngmesh.Elements2D()):
+        el.refine = 0
+        if random.random() < 0.4:
+            el.refine = 1
     
     ngmesh.Refine(adaptive=True)
     mesh = Mesh(ngmesh)
@@ -169,8 +169,8 @@ for i in range(1):
 #     amh.refine(refs)
     
 
-xcoarse, _, _ = SpatialCoordinate(amh[0])
-xfine, _, _ = SpatialCoordinate(amh[-1]) 
+xcoarse, _ = SpatialCoordinate(amh[0])
+xfine, _ = SpatialCoordinate(amh[-1]) 
 Vcoarse = FunctionSpace(amh[0], "CG", 1)
 Vfine = FunctionSpace(amh[-1], "CG", 1)
 u = Function(Vcoarse)
@@ -182,11 +182,12 @@ v.rename("fine")
 
 #Evaluate sin function on coarse mesh
 u.interpolate(xcoarse)
+u.interpolate(sin(pi * xcoarse))
 atm = AdaptiveTransferManager()
 
 atm.prolong(u, v)
-VTKFile("output/output_coarse_atmtest.pvd").write(u)
-VTKFile("output/output_fine_atmtest.pvd").write(v)
+VTKFile("output/split_transfer/output_coarse_atmtest.pvd").write(u)
+VTKFile("output/split_transfer/output_fine_atmtest.pvd").write(v)
 
 
 # # RESTRICT

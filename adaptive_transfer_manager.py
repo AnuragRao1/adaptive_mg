@@ -72,7 +72,6 @@ class AdaptiveTransferManager(TransferManager):
             for split_label, _ in source_function_splits.items():
                 transfer_op(source_function_splits[split_label], target_function_splits[split_label]) 
                 
-
             amh.recombine(target_function_splits, curr_target, child=order+1)
             curr_source = curr_target
 

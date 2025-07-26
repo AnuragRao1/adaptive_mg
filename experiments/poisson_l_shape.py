@@ -12,9 +12,10 @@ from firedrake.mg.ufl_utils import coarsen
 from firedrake.dmhooks import get_appctx
 from firedrake import dmhooks
 from firedrake.solving_utils import _SNESContext
+import time
 
-def solve_poisson(mesh, params):
-    V = FunctionSpace(mesh, "CG", 1)
+def solve_poisson(p,mesh, params):
+    V = FunctionSpace(mesh, "CG", p)
     uh = Function(V, name="Solution")
     v = TestFunction(V)
     bc = DirichletBC(V, Constant(0), "on_boundary")
@@ -136,35 +137,66 @@ patch_relax = mg_params({
     "sub_pc_type": "lu"}},
 mat_type="aij")
 
-max_iterations = 15
-error_estimators = []
-dofs = []
-for i in range(max_iterations):
-    print(f"level {i}")
+max_iterations = 20
+for p in range(1,5):
+    dofs = []
+    error_estimators = []
+    amh = AdaptiveMeshHierarchy([mesh2])
 
-    uh = solve_poisson(mesh, patch_relax)
-    VTKFile(f"output/poisson_l/{max_iterations}/adaptive_loop_{i}.pvd").write(uh)
+    for i in range(max_iterations):
+        start = time.time()
+        print(f"level {i}")
+        mesh = amh[i]
 
-    (eta, error_est) = estimate_error(mesh, uh)
-    VTKFile(f"output/poisson_l/{max_iterations}/eta_{i}.pvd").write(eta)
+        uh = solve_poisson(p, mesh, patch_relax)
+        VTKFile(f"output/poisson_l/{max_iterations}_{p}/adaptive_loop_{i}.pvd").write(uh)
 
-    print(f"  ||u - u_h|| <= C x {error_est}")
-    error_estimators.append(error_est)
-    dofs.append(uh.function_space().dim())
+        (eta, error_est) = estimate_error(mesh, uh)
+        VTKFile(f"output/poisson_l/{max_iterations}_{p}/eta_{i}.pvd").write(eta)
 
-    mesh = adapt(mesh, eta)
-    if i != max_iterations - 1:
-        amh.add_mesh(mesh)
+        print(f"  ||u - u_h|| <= C x {error_est}")
+        error_estimators.append(error_est)
+        dofs.append(uh.function_space().dim())
+
+        mesh = adapt(mesh, eta)
+        if i != max_iterations - 1:
+            amh.add_mesh(mesh)
+        print(f"DoFs: {dofs[-1]}, TIME: {time.time() - start}")
+    
+    np.save(f"output/poisson_l/{max_iterations}_{p}/dofs.npy", np.array(dofs))
+    np.save(f"output/poisson_l/{max_iterations}_{p}/error_est.npy", np.array(error_estimators))
+
+
 
 import matplotlib.pyplot as plt
 import numpy as np
+for p in range(1, 5):
+    dofs = np.load(f"output/poisson_l/{max_iterations}_{p}/dofs.npy", allow_pickle=True)
+    error_estimators = np.load(f"output/poisson_l/{max_iterations}_{p}/error_est.npy", allow_pickle=True)
+
+    plt.grid()
+    plt.loglog(dofs, error_estimators, '-ok', label="Measured convergence")
+    scaling = 1.5 * error_estimators[0]/dofs[0]**-(1/(2**p))
+    plt.loglog(dofs, np.array(dofs)**(-0.5) * scaling, '--', label="Optimal convergence")
+    plt.xlabel("Number of degrees of freedom")
+    plt.ylabel(r"Error estimate of energy norm $\sqrt{\sum_K \eta_K^2}$")
+    plt.title(f"Convergence for p={p}")
+    plt.legend()
+    plt.savefig(f"output/poisson_l/{max_iterations}_{p}/adaptive_convergence.png")
+    plt.close()
 
 plt.grid()
-plt.loglog(dofs, error_estimators, '-ok', label="Measured convergence")
-scaling = 1.5 * error_estimators[0]/dofs[0]**-(0.5)
-plt.loglog(dofs, np.array(dofs)**(-0.5) * scaling, '--', label="Optimal convergence")
-plt.xlabel("Number of degrees of freedom")
+colors = ['blue', 'green', 'red', 'purple']  
+for p in range(1,5):
+    dofs = np.load(f"output/poisson_l/{max_iterations}_{p}/dofs.npy", allow_pickle=True)
+    error_estimators = np.load(f"output/poisson_l/{max_iterations}_{p}/error_est.npy", allow_pickle=True)
+    plt.loglog(dofs, error_estimators, '-o', markersize = 3, color = colors[p-1], label=f"p={p}")
+
+plt.xlabel("Number of DoFs")
 plt.ylabel(r"Error estimate of energy norm $\sqrt{\sum_K \eta_K^2}$")
+plt.title("Convergence of Error Estimator")
 plt.legend()
-plt.savefig(f"output/poisson_l/{max_iterations}/adaptive_convergence_{i}.png")
+plt.savefig(f"output/poisson_l/{max_iterations}_4/joint_adaptive_convergence.png")
 plt.show()
+
+
