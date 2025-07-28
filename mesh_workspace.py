@@ -130,7 +130,7 @@ mesh2 = Mesh(ngmesh)
 amh = AdaptiveMeshHierarchy([mesh])
 # VTKFile("output/meshes/initial_mesh.pvd").write(Function(FunctionSpace(mesh, "DG", 0)))
 
-for i in range(1):
+for i in range(2):
     # for_ref = np.zeros((len(ngmesh.Elements2D())))
     # for l, el in enumerate(ngmesh.Elements3D()):
     #     el.refine = 0
@@ -186,8 +186,8 @@ u.interpolate(sin(pi * xcoarse))
 atm = AdaptiveTransferManager()
 
 atm.prolong(u, v)
-VTKFile("output/split_transfer/output_coarse_atmtest.pvd").write(u)
-VTKFile("output/split_transfer/output_fine_atmtest.pvd").write(v)
+# VTKFile("output/split_transfer/output_coarse_atmtest.pvd").write(u)
+# VTKFile("output/split_transfer/output_fine_atmtest.pvd").write(v)
 
 
 # # RESTRICT

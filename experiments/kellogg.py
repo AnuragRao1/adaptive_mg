@@ -23,10 +23,7 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, dim=1e3):
         v = TestFunction(V)
         bc = DirichletBC(V, u_real, "on_boundary")
 
-        W = FunctionSpace(mesh, "DG", 0)
-        a = Function(V)
         x = SpatialCoordinate(mesh)
-        # a.interpolate(conditional(x[0] * x[1] < 0, Constant(1.0), Constant(161.4476387975881)))
         a = conditional(lt(x[0] * x[1], 0), Constant(1.0), Constant(161.4476387975881)) # Leaving in this format resolves divergence of solver
         F = inner(a * grad(uh), grad(v))*dx # f == 0, 
         
@@ -72,7 +69,7 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, dim=1e3):
         eta_jump = assemble(inner(v('+')**0.5 * jump(a * grad(uh), n)**2, w('+')) * dS
             + inner(v('-')**0.5 * jump(a * grad(uh), n)**2, w('-')) * dS)
         eta_boundary = assemble(inner(v**0.5 * dot(grad(u_boundary - uh), t)**2, w) * ds)
-        # print(W.dim(), sqrt(sum(eta_vol.dat.data)), sqrt(sum(eta_jump.dat.data)), sqrt(sum(eta_boundary.dat.data)))
+        print(f"Vol: {sqrt(sum(eta_vol.dat.data))}, Jump: {sqrt(sum(eta_jump.dat.data))}, Boundary: {sqrt(sum(eta_boundary.dat.data))}")
         
         sp = {"mat_type": "matfree", "ksp_type": "richardson", "pc_type": "jacobi"}
         solve(G == 0, eta_sq, solver_parameters=sp)
@@ -222,6 +219,7 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, dim=1e3):
     times.append(start_time)
     level = 0
     while level == 0 or u_k.function_space().dim() <= dim:
+        start = time.time()
         if uniform:
             mesh = mh[level]
 
@@ -243,10 +241,11 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, dim=1e3):
         # print("TIME TO GENERATE REAL U: ", time.time() - start)
 
         while norm(uh - u_prev) > lam_alg * error_est or k == 0:
+
             k += 1
             u_prev.interpolate(uh)
             # start = time.time()
-            uh = solve_kellogg(mesh, p, uh, u_real, chol, uniform)
+            uh = solve_kellogg(mesh, p, uh, u_real, patch_relax, uniform)
             # print("TIME TO SOLVE KELLOGG: ", time.time() - start)
 
             # start = time.time()
@@ -258,6 +257,7 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, dim=1e3):
                 error_estimators[level] = [error_est]
             else:
                 error_estimators[level].append(error_est)
+
 
         u_k = Function(V).interpolate(uh)
         VTKFile(f"output/kellogg/theta={theta}_lam={lam_alg}_dim={dim}/{p}/{level}_{k}.pvd").write(uh)
@@ -274,9 +274,11 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, dim=1e3):
                 amh.add_mesh(mesh)
         # print("TIME TO REFINE/ADD MESH: ", time.time() - start)
         
-        times.append(time.time())
-        print(f"DOFS {dofs[-1]}: TIME {times[-1] - times[-2]}")
+        times.append(time.time() - start)
+        print(f"DOFS {dofs[-1]}: TIME {times[-1]}")
         level += 1
+
+        
     # print("TIMES FOR LEVELS: ", times)
 
     final_errors = [error_estimators[key][-1] for key in error_estimators]
@@ -287,25 +289,21 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, dim=1e3):
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
     import numpy as np
-    # from mpi4py import MPI
-
-    # comm = MPI.COMM_WORLD
-    # rank = comm.Get_rank()
-    # size = comm.Get_size()
 
     theta = 0.5
     lambda_alg = 0.01
-    dim = 300000
+    dim = 80000
 
 
     errors_true = {}
     errors_est = {}
     dofs = {}
+    times = {}
     # results = [run_system(i, theta, lambda_alg, levels) for i in range(1, 5)]
     # all_results = comm.gather(results, root=0)
     # print(all_results)
 
-    for p in range(3,4):
+    for p in range(2,3):
         (dof, est, true, times) = run_system(p, theta, lambda_alg, dim)
         dofs[p] = dof
         errors_est[p] = est
@@ -334,16 +332,15 @@ if __name__ == "__main__":
         plt.savefig(f"output/kellogg/theta={theta}_lam={lambda_alg}_dim={dim}/{p}/single_convergence.png")
 
 
-    # for i in range(4):
-    #     (p, dof, est, true) = all_results[0][i]
-    #     errors_true[p] = true
-    #     errors_est[p] = est
-    #     dofs[p] = dof
-
     # for p in range(1,5):
     #     dofs[p] = np.load(f"output/kellogg/theta={theta}_lam={lambda_alg}_dim={dim}/{p}/dofs.npy", allow_pickle=True)
     #     errors_est[p] = np.load(f"output/kellogg/theta={theta}_lam={lambda_alg}_dim={dim}/{p}/errors_estimator.npy", allow_pickle=True)
     #     errors_true[p] = np.load(f"output/kellogg/theta={theta}_lam={lambda_alg}_dim={dim}/{p}/errors_true.npy", allow_pickle=True)
+    #     times[p] = np.load(f"output/kellogg/theta={theta}_lam={lambda_alg}_dim={dim}/{p}/times.npy", allow_pickle=True)
+
+
+    # for i, dat in enumerate(zip(dofs[2].item()[2], errors_est[2])):
+    #     print(i, dat, times[2][i])
 
     # colors = ['blue', 'green', 'red', 'purple']  
     # plt.figure(figsize=(8, 6))

@@ -138,33 +138,33 @@ patch_relax = mg_params({
 mat_type="aij")
 
 max_iterations = 20
-for p in range(1,5):
-    dofs = []
-    error_estimators = []
-    amh = AdaptiveMeshHierarchy([mesh2])
+# for p in range(1,5):
+#     dofs = []
+#     error_estimators = []
+#     amh = AdaptiveMeshHierarchy([mesh2])
 
-    for i in range(max_iterations):
-        start = time.time()
-        print(f"level {i}")
-        mesh = amh[i]
+#     for i in range(max_iterations):
+#         start = time.time()
+#         print(f"level {i}")
+#         mesh = amh[i]
 
-        uh = solve_poisson(p, mesh, patch_relax)
-        VTKFile(f"output/poisson_l/{max_iterations}_{p}/adaptive_loop_{i}.pvd").write(uh)
+#         uh = solve_poisson(p, mesh, patch_relax)
+#         VTKFile(f"output/poisson_l/{max_iterations}_{p}/adaptive_loop_{i}.pvd").write(uh)
 
-        (eta, error_est) = estimate_error(mesh, uh)
-        VTKFile(f"output/poisson_l/{max_iterations}_{p}/eta_{i}.pvd").write(eta)
+#         (eta, error_est) = estimate_error(mesh, uh)
+#         VTKFile(f"output/poisson_l/{max_iterations}_{p}/eta_{i}.pvd").write(eta)
 
-        print(f"  ||u - u_h|| <= C x {error_est}")
-        error_estimators.append(error_est)
-        dofs.append(uh.function_space().dim())
+#         print(f"  ||u - u_h|| <= C x {error_est}")
+#         error_estimators.append(error_est)
+#         dofs.append(uh.function_space().dim())
 
-        mesh = adapt(mesh, eta)
-        if i != max_iterations - 1:
-            amh.add_mesh(mesh)
-        print(f"DoFs: {dofs[-1]}, TIME: {time.time() - start}")
+#         mesh = adapt(mesh, eta)
+#         if i != max_iterations - 1:
+#             amh.add_mesh(mesh)
+#         print(f"DoFs: {dofs[-1]}, TIME: {time.time() - start}")
     
-    np.save(f"output/poisson_l/{max_iterations}_{p}/dofs.npy", np.array(dofs))
-    np.save(f"output/poisson_l/{max_iterations}_{p}/error_est.npy", np.array(error_estimators))
+#     np.save(f"output/poisson_l/{max_iterations}_{p}/dofs.npy", np.array(dofs))
+#     np.save(f"output/poisson_l/{max_iterations}_{p}/error_est.npy", np.array(error_estimators))
 
 
 

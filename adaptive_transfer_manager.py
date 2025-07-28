@@ -3,6 +3,9 @@ from firedrake import *
 from firedrake.mg.embedded import TransferManager
 from firedrake.mg.utils import get_level
 
+import time
+
+
 __all__ = ("AdaptiveTransferManager", )
 
 
@@ -27,12 +30,8 @@ class AdaptiveTransferManager(TransferManager):
 
     def generic_transfer(self, source, target, transfer_op):
         # determine which meshes to iterate over
-        amh, _ = get_level(source.function_space().mesh())
-        for l, mesh in enumerate(amh.meshes):
-            if source.function_space().mesh() == mesh:
-                source_level = l
-            if target.function_space().mesh() == mesh:
-                target_level = l
+        amh, source_level = get_level(source.function_space().mesh())
+        _, target_level = get_level(target.function_space().mesh())
             
         # decide order of iteration depending on coarse -> fine or fine -> coarse
         order = 1
