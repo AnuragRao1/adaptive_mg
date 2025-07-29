@@ -289,11 +289,10 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, dim=1e3):
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
     import numpy as np
-    from firedrake import *
 
     theta = 0.5
     lambda_alg = 0.01
-    dim = 20
+    dim = 1e3
 
 
     errors_true = {}

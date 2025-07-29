@@ -27,6 +27,7 @@ class AdaptiveTransferManager(TransferManager):
     def __init__(self, *, native_transfers=None, use_averaging=True):  
         super().__init__(native_transfers=native_transfers, use_averaging=use_averaging)
         self.tm = TransferManager()
+        self.weight_cache = {}
 
     def generic_transfer(self, source, target, transfer_op):
         # determine which meshes to iterate over
@@ -55,7 +56,12 @@ class AdaptiveTransferManager(TransferManager):
                     curr_target = Cofunction(target_space)
 
             if transfer_op == self.tm.restrict:
-                w = amh.use_weight(curr_source, child=True)
+                if (level, level + order) not in self.weight_cache:
+                    w = amh.use_weight(curr_source, child=True)
+                    self.weight_cache[(source_level, target_level)] = Function(curr_source.function_space()).assign(w)
+                else:
+                    w = self.weight_cache[(source_level, target_level)]
+
                 wsource = Function(curr_source.function_space())
                 with curr_source.dat.vec as svec, w.dat.vec as wvec, wsource.dat.vec as wsvec:
                     wsvec.pointwiseDivide(svec, wvec)
