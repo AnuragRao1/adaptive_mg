@@ -73,7 +73,7 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, dim=1e3):
         
         sp = {"mat_type": "matfree", "ksp_type": "richardson", "pc_type": "jacobi"}
         solve(G == 0, eta_sq, solver_parameters=sp)
-        
+
         eta = Function(W).interpolate(sqrt(eta_sq))  # compute eta from eta^2
         # VTKFile(f"output/kellogg/theta={theta}_lam={lam_alg}_dim={dim}/{p}/eta_{level}.pvd").write(eta)
 
@@ -137,14 +137,20 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, dim=1e3):
     square = wp.Rectangle(2.0,2.0).Face()
     square = square.Move(Vec(-1.0, -1.0, 0))
     geo = OCCGeometry(square, dim=2)
-    ngmsh = geo.GenerateMesh(maxh=1) 
-    mesh = Mesh(ngmsh)
+    ngmesh = geo.GenerateMesh(maxh=2) 
+    
+    # from netgen.meshing import Mesh as NetgenMesh
+    # ngmesh = NetgenMesh()
+    # ngmesh.Load("square.msh")
+    # if ngmesh.Coordinates() is None:
+    #     print("COORDINATES NONE")
+
+    mesh = Mesh(ngmesh)
     amh = AdaptiveMeshHierarchy([mesh])
     atm = AdaptiveTransferManager()
     tm = TransferManager()
     
     
-
     # ESTABLISH SOLVER PARAMS
     lu = {
         "ksp_type": "preonly",
@@ -202,7 +208,6 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, dim=1e3):
     # ITERATIVE LOOP
 
     # max_iterations = max_iterations
-    dim = dim
 
     uniform = False
     if uniform:
@@ -303,7 +308,7 @@ if __name__ == "__main__":
     # all_results = comm.gather(results, root=0)
     # print(all_results)
 
-    for p in range(1,2):
+    for p in range(2,3):
         (dof, est, true, times) = run_system(p, theta, lambda_alg, dim)
         dofs[p] = dof
         errors_est[p] = est

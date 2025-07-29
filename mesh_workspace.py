@@ -181,27 +181,27 @@ v.rename("fine")
 # PROLONG
 
 #Evaluate sin function on coarse mesh
-u.interpolate(xcoarse)
-u.interpolate(sin(pi * xcoarse))
-atm = AdaptiveTransferManager()
+# u.interpolate(xcoarse)
+# u.interpolate(sin(pi * xcoarse))
+# atm = AdaptiveTransferManager()
 
-atm.prolong(u, v)
+# atm.prolong(u, v)
 # VTKFile("output/split_transfer/output_coarse_atmtest.pvd").write(u)
 # VTKFile("output/split_transfer/output_fine_atmtest.pvd").write(v)
 
 
 # # RESTRICT
-# u.interpolate(xcoarse)
-# atm = AdaptiveTransferManager()
-# atm.prolong(u, v)
+u.interpolate(xcoarse)
+atm = AdaptiveTransferManager()
+atm.prolong(u, v)
 
 
-# # rf = Cofunction(Vfine.dual()).assign(1)
-# rf = assemble(TestFunction(Vfine)*dx)
-# rc = Cofunction(Vcoarse.dual()) 
-# atm.restrict(rf, rc)
+# rf = Cofunction(Vfine.dual()).assign(1)
+rf = assemble(TestFunction(Vfine)*dx)
+rc = Cofunction(Vcoarse.dual()) 
+atm.restrict(rf, rc)
 
-# assembled_rc = assemble(TestFunction(Vcoarse)*dx)
-# print("Adaptive TM: ", assemble(action(rc, u)), assemble(action(rf, v)))
-# assert (assemble(action(rc, u)) - assemble(action(rf, v))) / assemble(action(rf, v)) <= 1e-2
+assembled_rc = assemble(TestFunction(Vcoarse)*dx)
+print("Adaptive TM: ", assemble(action(rc, u)), assemble(action(rf, v)))
+assert (assemble(action(rc, u)) - assemble(action(rf, v))) / assemble(action(rf, v)) <= 1e-2
 

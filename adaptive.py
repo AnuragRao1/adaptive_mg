@@ -50,9 +50,13 @@ class AdaptiveMeshHierarchy(HierarchyBase):
 
         coarse_mesh = RelabeledMesh(coarse_mesh, [coarse_splits[i] for i in range(1,max_children + 1)], list(range(1,max_children + 1)), name="Relabeled_coarse")
         c_subm = {j: Submesh(coarse_mesh, coarse_mesh.topology_dm.getDimension(), j) for j in range(1,max_children + 1) if any(num_children == j)}
+        set_level(coarse_mesh, self, level - 2)
 
+        
         mesh = RelabeledMesh(mesh, [fine_splits[i] for i in range(1,max_children + 1)], list(range(1,max_children + 1)))
         f_subm = {int(str(j)[-2:]): Submesh(mesh, mesh.topology_dm.getDimension(), j) for j in [int("10" + str(i)) for i in range(1,max_children + 1)] if any(num_children == int(str(j)[-2:]))}
+        set_level(mesh, self, level - 1)
+
 
         # update c2f and f2c for submeshes by mapping numberings on full mesh to numberings on coarse mesh
         n = [len([el for el in c2f if len(el) == j]) for j in range(1,max_children + 1)] 
@@ -98,15 +102,17 @@ class AdaptiveMeshHierarchy(HierarchyBase):
 
         ind = 1 if child else 0
         hierarchy_dict = self.submesh_hierarchies[int(level)-ind]
+        u_corr_space = Function(V.reconstruct(hierarchy_dict[[*hierarchy_dict][0]].meshes[ind].submesh_parent))
+        u_corr_space.dat.data[:] = u.dat.data
 
         split_functions = {}
         for i in hierarchy_dict:
             V_split = V.reconstruct(mesh=hierarchy_dict[i].meshes[ind])
+            assert V_split.mesh().submesh_parent == u_corr_space.function_space().mesh()
             if isinstance(u, Function):
-                split_functions[i] = Function(V_split, name=str(i)).interpolate(u)
+                split_functions[i] = Function(V_split, name=str(i)).interpolate(u_corr_space)
             elif isinstance(u, Cofunction):
-                split_functions[i] = cofun_interpolate(u, Cofunction(V_split, name=str(i)))
-
+                split_functions[i] = cofun_interpolate(u_corr_space, Cofunction(V_split, name=str(i)))
 
         return split_functions
     
@@ -228,6 +234,7 @@ def cofun_interpolate(rsource, rtarget, subset=None):
     usource = cofun_as_function(rsource)
     utarget = cofun_as_function(rtarget)
     temp = Function(utarget.function_space())
+    assert temp.function_space().mesh().submesh_parent == usource.function_space().mesh() or temp.function_space().mesh() == usource.function_space().mesh().submesh_parent
     temp.interpolate(usource, subset=subset)
     utarget.assign(utarget + temp)
     return rtarget
