@@ -6,6 +6,8 @@ from firedrake.mg.ufl_utils import coarsen
 from firedrake.dmhooks import get_appctx
 from firedrake import dmhooks
 from firedrake.solving_utils import _SNESContext
+from firedrake.mg.utils import get_level
+
 
 import time
 
@@ -14,6 +16,8 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from adaptive import AdaptiveMeshHierarchy
 from adaptive_transfer_manager import AdaptiveTransferManager
+
+from firedrake.petsc import PETSc
 
     
 def run_system(p=2, theta=0.5, lam_alg=0.01, dim=1e3):
@@ -26,6 +30,7 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, dim=1e3):
         x = SpatialCoordinate(mesh)
         a = conditional(lt(x[0] * x[1], 0), Constant(1.0), Constant(161.4476387975881)) # Leaving in this format resolves divergence of solver
         F = inner(a * grad(uh), grad(v))*dx # f == 0, 
+        
         
         problem = NonlinearVariationalProblem(F, uh, bc)
 
@@ -40,7 +45,10 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, dim=1e3):
             # with dmhooks.add_hooks(dm, solver, appctx=appctx, save=False):
             #     coarsen(problem, coarsen)
 
-        solver.solve()
+        _, level = get_level(mesh)
+        with PETSc.Log.Event(f"adaptive_{level}"):
+            solver.solve()
+
         return uh
 
 
