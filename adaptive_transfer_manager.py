@@ -5,6 +5,8 @@ from firedrake.mg.utils import get_level
 
 import time
 
+from mpi4py import MPI
+
 
 __all__ = ("AdaptiveTransferManager", )
 
@@ -75,6 +77,7 @@ class AdaptiveTransferManager(TransferManager):
                 target_function_splits = amh.split_function(curr_target, child=False)
 
             for split_label, _ in source_function_splits.items():
+
                 transfer_op(source_function_splits[split_label], target_function_splits[split_label]) 
                 
             amh.recombine(target_function_splits, curr_target, child=order+1)

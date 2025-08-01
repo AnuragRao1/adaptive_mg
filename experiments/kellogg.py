@@ -7,9 +7,11 @@ from firedrake.dmhooks import get_appctx
 from firedrake import dmhooks
 from firedrake.solving_utils import _SNESContext
 from firedrake.mg.utils import get_level
+from itertools import accumulate
 
 
 import time
+import csv
 
 import sys
 import os
@@ -141,23 +143,51 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, dim=1e3):
 
 
     # BUILD DOMAIN
-    wp = WorkPlane()
-    square = wp.Rectangle(2.0,2.0).Face()
-    square = square.Move(Vec(-1.0, -1.0, 0))
-    geo = OCCGeometry(square, dim=2)
-    ngmesh = geo.GenerateMesh(maxh=2) 
+    # wp = WorkPlane()
+    # square = wp.Rectangle(2.0,2.0).Face()
+    # square = square.Move(Vec(-1.0, -1.0, 0))
+    # geo = OCCGeometry(square, dim=2)
+    # ngmesh = geo.GenerateMesh(maxh=2) 
     
-    # from netgen.meshing import Mesh as NetgenMesh
-    # ngmesh = NetgenMesh()
-    # ngmesh.Load("square.msh")
-    # if ngmesh.Coordinates() is None:
-    #     print("COORDINATES NONE")
+    from netgen.geom2d import unit_square
 
+    from netgen.meshing import Mesh as NetgenMesh
+    from netgen.meshing import MeshPoint, Element2D, FaceDescriptor, Element1D 
+    from netgen.csg import Pnt 
+    
+    ngmesh = NetgenMesh(dim=2) 
+    
+    fd = ngmesh.Add(FaceDescriptor(bc=1,domin=1,surfnr=1)) 
+    
+    pnums = [] 
+    pnums.append(ngmesh.Add(MeshPoint(Pnt(-1, -1, 0)))) 
+    pnums.append(ngmesh.Add(MeshPoint(Pnt(-1, 1, 0))))  
+    pnums.append(ngmesh.Add(MeshPoint(Pnt( 1, 1, 0))))  
+    pnums.append(ngmesh.Add(MeshPoint(Pnt( 1, -1, 0)))) 
+    pnums.append(ngmesh.Add(MeshPoint(Pnt( 0, 0, 0))))  
+    
+    ngmesh.Add(Element2D(fd, [pnums[0], pnums[1], pnums[4]]))  
+    ngmesh.Add(Element2D(fd, [pnums[1], pnums[2], pnums[4]]))  
+    ngmesh.Add(Element2D(fd, [pnums[2], pnums[3], pnums[4]]))  
+    ngmesh.Add(Element2D(fd, [pnums[3], pnums[0], pnums[4]])) 
+    
+    ngmesh.Add(Element1D([pnums[0], pnums[1]], index=1)) 
+    ngmesh.Add(Element1D([pnums[1], pnums[2]], index=1)) 
+    ngmesh.Add(Element1D([pnums[2], pnums[3]], index=1)) 
+    ngmesh.Add(Element1D([pnums[0], pnums[3]], index=1))
+
+
+
+
+    for i in range(2):
+        for l, el in enumerate(ngmesh.Elements2D()):
+            el.refine = 1
+        ngmesh.Refine(adaptive=True)
     mesh = Mesh(ngmesh)
+
     amh = AdaptiveMeshHierarchy([mesh])
     atm = AdaptiveTransferManager()
     tm = TransferManager()
-    
     
     # ESTABLISH SOLVER PARAMS
     lu = {
@@ -231,8 +261,12 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, dim=1e3):
     start_time = time.time()
     times.append(start_time)
     level = 0
+    csv_file = f"output/kellogg/theta={theta}_lam={lam_alg}_dim={dim}/{p}/dat.csv"
+    with open(csv_file, mode='w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(["dof", "error_est", "error_true", "k", "time"])
+
     while level == 0 or u_k.function_space().dim() <= dim:
-        start = time.time()
         if uniform:
             mesh = mh[level]
 
@@ -240,6 +274,7 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, dim=1e3):
         V = FunctionSpace(mesh, "CG", p)
         uh = Function(V, name="solution")
         u_prev = Function(V, name="u_prev")
+        dofs.append(uh.function_space().dim())
         
         if level > 0:
             # start = time.time()
@@ -254,40 +289,41 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, dim=1e3):
         # print("TIME TO GENERATE REAL U: ", time.time() - start)
 
         while norm(uh - u_prev) > lam_alg * error_est or k == 0:
-
             k += 1
             u_prev.interpolate(uh)
-            # start = time.time()
+                        
+            start = time.time()
             uh = solve_kellogg(mesh, p, uh, u_real, patch_relax, uniform)
-            # print("TIME TO SOLVE KELLOGG: ", time.time() - start)
+            times.append(time.time() - start)
 
-            # start = time.time()
             (eta, error_est) = estimate_error(mesh, uh, u_real) 
-            # print("TIME TO ESTIMATE ERROR: ", time.time() - start)
             print("ERROR ESTIMATE: ", error_est)
 
             if level not in error_estimators:
                 error_estimators[level] = [error_est]
             else:
                 error_estimators[level].append(error_est)
+            
+            err_real = norm(uh - u_real)
+            true_errors.append(err_real)
+            with open(csv_file, mode='a', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow([dofs[-1], error_est, err_real, k, times[-1]])
+
+
 
 
         u_k = Function(V).interpolate(uh)
-        VTKFile(f"output/kellogg/theta={theta}_lam={lam_alg}_dim={dim}/{p}/{level}_{k}.pvd").write(uh)
+        if level % 10 == 0 or level < 15:
+            VTKFile(f"output/kellogg/theta={theta}_lam={lam_alg}_dim={dim}/{p}/{level}_{k}.pvd").write(uh)
         k_l.append(k)
-        dofs.append(uh.function_space().dim())
 
-        err_real = norm(u_k - u_real)
-        # print("TRUE ERROR: ", err_real)
-        true_errors.append(err_real)
-        # start = time.time()
         if not uniform:
             mesh = adapt(mesh, eta)
             if u_k.function_space().dim() <= dim:
                 amh.add_mesh(mesh)
         # print("TIME TO REFINE/ADD MESH: ", time.time() - start)
         
-        times.append(time.time() - start)
         print(f"DOFS {dofs[-1]}: TIME {times[-1]}")
         level += 1
 
@@ -305,44 +341,47 @@ if __name__ == "__main__":
 
     theta = 0.5
     lambda_alg = 0.01
-    dim = 1e3
+    dim = 250000 
 
 
     errors_true = {}
     errors_est = {}
     dofs = {}
     times = {}
-    # results = [run_system(i, theta, lambda_alg, levels) for i in range(1, 5)]
-    # all_results = comm.gather(results, root=0)
-    # print(all_results)
+   
+    # for p in range(1,2):
+    #     # (dof, est, true, times) = run_system(p, theta, lambda_alg, dim)
 
-    for p in range(2,3):
-        (dof, est, true, times) = run_system(p, theta, lambda_alg, dim)
-        dofs[p] = dof
-        errors_est[p] = est
-        errors_true[p] = true
+    #     with open(f"output/kellogg/theta={theta}_lam={lambda_alg}_dim={dim}/{p}/dat.csv", "r", newline="") as f:
+    #         reader = csv.reader(f)
+    #         rows = list(reader)
+        
+    #     columns = list(zip(*rows))
+    #     dofs[p] = np.array(columns[0][1:], dtype=float)
+    #     errors_est[p] = np.array(columns[1][1:], dtype=float)
+    #     errors_true[p] = np.array(columns[2][1:], dtype=float)
+    #     times = np.array(columns[4][1:], dtype=float)
 
-        np.save(f"output/kellogg/theta={theta}_lam={lambda_alg}_dim={dim}/{p}/dofs.npy", dof)
-        np.save(f"output/kellogg/theta={theta}_lam={lambda_alg}_dim={dim}/{p}/errors_estimator.npy", est)
-        np.save(f"output/kellogg/theta={theta}_lam={lambda_alg}_dim={dim}/{p}/errors_true.npy", true)
-        np.save(f"output/kellogg/theta={theta}_lam={lambda_alg}_dim={dim}/{p}/times.npy", times)
+    #     dof = dofs[p]
+    #     est = errors_est[p]
 
-        plt.figure(figsize=(8, 6))
-        plt.grid(True)
-        plt.loglog(dof[1:], est[1:], '-ok', alpha = 0.7, markersize = 4)
-        scaling = est[1] / dof[1]**-0.5
-        plt.loglog(dof[1:], scaling * dof[1:]**-0.5, '--', alpha=0.5, color="lightcoral", label="x^{-0.5}")
-        scaling = est[1] / dof[1]**-0.1
-        plt.loglog(dof[1:], scaling * dof[1:]**-0.1, '--', alpha = 0.5, color='lawngreen', label = "x^{-0.1}")
-        scaling = est[1] / dof[1]**-1
-        plt.loglog(dof[1:], scaling * dof[1:]**-1, '--', alpha = 0.5, color = 'aqua', label = "x^{-1}")
-        scaling = est[1] / dof[1]**-2
-        plt.loglog(dof[1:], scaling * dof[1:]**-2, '--', alpha = 0.5, color = 'indigo', label = "x^{-2}")
-        plt.xlabel("Number of degrees of freedom")
-        plt.ylabel(r"Estimated energy norm $\sqrt{\sum_K \eta_K^2}$")
-        plt.title(f"Estimated Error Convergence p={p}")
-        plt.legend()
-        plt.savefig(f"output/kellogg/theta={theta}_lam={lambda_alg}_dim={dim}/{p}/single_convergence.png")
+    #     plt.figure(figsize=(8, 6))
+    #     plt.grid(True)
+    #     plt.loglog(dof[1:], est[1:], '-ok', alpha = 0.7, markersize = 4)
+    #     scaling = est[1] / dof[1]**-0.5
+    #     plt.loglog(dof[1:], scaling * dof[1:]**-0.5, '--', alpha=0.5, color="lightcoral", label="x^{-0.5}")
+    #     scaling = est[1] / dof[1]**-0.1
+    #     plt.loglog(dof[1:], scaling * dof[1:]**-0.1, '--', alpha = 0.5, color='lawngreen', label = "x^{-0.1}")
+    #     scaling = est[1] / dof[1]**-1
+    #     plt.loglog(dof[1:], scaling * dof[1:]**-1, '--', alpha = 0.5, color = 'aqua', label = "x^{-1}")
+    #     scaling = est[1] / dof[1]**-2
+    #     plt.loglog(dof[1:], scaling * dof[1:]**-2, '--', alpha = 0.5, color = 'indigo', label = "x^{-2}")
+    #     plt.xlabel("Number of degrees of freedom")
+    #     plt.ylabel(r"Estimated energy norm $\sqrt{\sum_K \eta_K^2}$")
+    #     plt.title(f"Estimated Error Convergence p={p}, Multigrid")
+    #     plt.legend()
+    #     plt.savefig(f"output/kellogg/theta={theta}_lam={lambda_alg}_dim={dim}/{p}/single_convergence.png")
+    #     plt.show()
 
 
     # for p in range(1,5):
@@ -352,14 +391,14 @@ if __name__ == "__main__":
     #     times[p] = np.load(f"output/kellogg/theta={theta}_lam={lambda_alg}_dim={dim}/{p}/times.npy", allow_pickle=True)
 
 
-    # for i, dat in enumerate(zip(dofs[2].item()[2], errors_est[2])):
-    #     print(i, dat, times[2][i])
+    # # for i, dat in enumerate(zip(dofs[2].item()[2], errors_est[2])):
+    # #     print(i, dat, times[2][i])
 
     # colors = ['blue', 'green', 'red', 'purple']  
     # plt.figure(figsize=(8, 6))
     # plt.grid(True)
     # for p in range(4):
-    #     plt.loglog(dofs[p+1].item()[p+1], errors_est[p+1], '-o', color=colors[p], alpha = 0.7, markersize=4, label=f"Measured convergence $p={p+1}$")
+    #     plt.loglog(dofs[p+1], errors_est[p+1], '-o', color=colors[p], alpha = 0.5, markersize=2.5, label=f"p={p+1}")
 
     # plt.xlabel("Number of degrees of freedom")
     # plt.ylabel(r"Estimated energy norm $\sqrt{\sum_K \eta_K^2}$")
@@ -371,7 +410,7 @@ if __name__ == "__main__":
     # plt.figure(figsize=(8, 6))
     # plt.grid(True)
     # for p in range(4):
-    #     plt.loglog(dofs[p+1].item()[p+1], errors_true[p+1], '-.', color=colors[p], alpha = 0.7, label=f"True Error Norm $p={p+1}$")
+    #     plt.loglog(dofs[p+1], errors_true[p+1], '-.', color=colors[p], alpha = 0.5, label=f"p={p+1}")
 
     # plt.xlabel("Number of degrees of freedom")
     # plt.ylabel(r"True error norm $\|u - u_h\|$")
@@ -428,3 +467,41 @@ if __name__ == "__main__":
     # plt.savefig(f"output/kellogg/theta={theta}_lam={lambda_alg}_dim={dim}/{p}/adaptive_convergence_true.png")
 
     # plt.show()
+
+    # TIME: 
+    p = 1
+    d_est = np.load(f"output/kellogg/theta={theta}_lam={lambda_alg}_dim={dim}/{p}/errors_estimator.npy", allow_pickle=True)
+    d_times = np.load(f"output/kellogg/theta={theta}_lam={lambda_alg}_dim={dim}/{p}/times.npy", allow_pickle=True)[1:] 
+    d_times = np.array(list(accumulate(d_times)))
+
+    with open(f"output/kellogg/theta={theta}_lam={lambda_alg}_dim={dim - 1}/{p}/dat.csv", "r", newline="") as f:
+        reader = csv.reader(f)
+        rows = list(reader)
+
+    # Transpose rows to get columns
+    columns = list(zip(*rows))
+    est = np.array(columns[1][1:], dtype=float)
+    times = np.array(columns[4][1:], dtype=float)
+
+    times = np.array(list(accumulate(times)))
+    print(times)
+    colors = ['blue', 'green', 'red', 'purple'] 
+    c = colors[p-1]
+    plt.figure(figsize=(8, 6))
+    plt.grid(True)
+    plt.loglog(times, est, '-o', alpha = 0.6, color=c, markersize = 3, label = "Multigrid")
+    plt.loglog(d_times, d_est, '-ok', alpha = 0.6, markersize = 3, label = "Direct")
+    scaling = est[0] / times[0]**-0.5
+    plt.loglog(times, scaling * times**-0.5, '--', alpha=0.5, color="lightcoral", label="t^{-0.5}")
+    scaling = est[0] / times[0]**-0.1
+    plt.loglog(times, scaling * times**-0.1, '--', alpha = 0.5, color='lawngreen', label = "t^{-0.1}")
+    scaling = est[0] / times[0]**-1
+    plt.loglog(times, scaling * times**-1, '--', alpha = 0.5, color = 'aqua', label = "t^{-1}")
+    scaling = est[0] / times[0]**-2
+    plt.loglog(times, scaling * times**-2, '--', alpha = 0.5, color = 'indigo', label = "t^{-2}")
+    plt.xlabel("Cumulative Runtime")
+    plt.ylabel(r"Estimated energy norm $\sqrt{\sum_K \eta_K^2}$")
+    plt.title(f"Estimator vs Cumulative Runtime for p={p}")
+    plt.legend()
+    plt.savefig(f"output/kellogg/theta={theta}_lam={lambda_alg}_dim={dim - 1}/{p}/direct_vs_mg_runtime.png")
+    plt.show()
