@@ -213,6 +213,9 @@ def split_to_submesh(mesh, coarse_mesh, c2f, f2c):
     for i in range(1, max_children+1):
         fine_splits[i].dat.data[num_children[f2c.squeeze()] == i] = 1
 
+    # [VTKFile(f"output/{i}_{len(f2c)}_coarse.pvd").write(coarse_splits[i]) for i in coarse_splits]
+    # [VTKFile(f"output/{i}_{len(f2c)}_fine.pvd").write(fine_splits[i]) for i in fine_splits]
+
     return coarse_splits, fine_splits, num_children
  
 def full_to_sub(mesh, submesh, label):
