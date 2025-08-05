@@ -161,10 +161,12 @@ def get_c2f_f2c_fd(mesh, coarse_mesh):
     num_parents = coarse_mesh.num_cells()
     
     if mesh.topology_dm.getDimension() == 2:
-        parents = ngmesh.GetParentSurfaceElements()
+        # parents = ngmesh.GetParentSurfaceElements()
+        parents = ngmesh.parentsurfaceelements.NumPy()
         elements = ngmesh.Elements2D()
     if mesh.topology_dm.getDimension() == 3:
-        parents = ngmesh.GetParentElements()
+        # parents = ngmesh.GetParentElements()
+        parents = ngmesh.parentelements.NumPy()
         elements = ngmesh.Elements3D()
     fine_mapping = lambda x: mesh._cell_numbering.getOffset(x)
     coarse_mapping = lambda x: coarse_mesh._cell_numbering.getOffset(x)
@@ -173,19 +175,18 @@ def get_c2f_f2c_fd(mesh, coarse_mesh):
     f2c = [[] for _ in range(mesh.num_cells())]
 
     for l,_ in enumerate(elements):
-
-        if parents[l] == -1 or l < num_parents:
+        if parents[l][0] == -1 or l < num_parents:
             f2c[fine_mapping(l)].append(coarse_mapping(l))
             c2f[coarse_mapping(l)].append(fine_mapping(l))
 
-        elif parents[l] < num_parents:
-            f2c[fine_mapping(l)].append(coarse_mapping(parents[l]))
-            c2f[coarse_mapping(parents[l])].append(fine_mapping(l))
+        elif parents[l][0] < num_parents:
+            f2c[fine_mapping(l)].append(coarse_mapping(parents[l][0]))
+            c2f[coarse_mapping(parents[l][0])].append(fine_mapping(l))
 
         else:
-            a = parents[parents[l]]
+            a = parents[parents[l][0]][0]
             while a >= num_parents:
-                a = parents[a]
+                a = parents[a][0]
 
             f2c[fine_mapping(l)].append(coarse_mapping(a))
             c2f[coarse_mapping(a)].append(fine_mapping(l))
