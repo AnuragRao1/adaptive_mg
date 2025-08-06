@@ -24,10 +24,10 @@ from adaptive_transfer_manager import AdaptiveTransferManager
     
 def run_system(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3):
     def solve_maxwell(mesh, p, alpha, u_prev, params, uniform):
-        V = FunctionSpace(mesh, "N1curl", p,)
+        V = FunctionSpace(mesh, "N1curl", p)
         uh = u_prev
         v = TestFunction(V)
-        bc = DirichletBC(V, Constant((0.0, 0.0)), "on_boundary")
+        bc = DirichletBC(V, Constant((0.0,0.0)), "on_boundary")
         alpha = Constant(alpha)
 
         x, y = SpatialCoordinate(mesh)
@@ -35,8 +35,8 @@ def run_system(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3):
         theta = atan2(y, x)
         theta = conditional(lt(theta, 0), theta + 2 * pi, theta) # map to [0 , 2pi]
 
-        f_expr = as_vector([2 * alpha * (alpha - 1) * r**(alpha - 2) * sin((2 - alpha) * theta) - r**alpha * sin(alpha * theta),
-                       -2 * alpha * (alpha - 1) * r**(alpha - 2) * cos((2 - alpha) * theta) + r**alpha * cos(alpha * theta)])
+        f_expr = as_vector([2 * alpha * (alpha - 1) * r**(alpha - 2) * sin((1 - alpha) * theta) - r**alpha * sin(alpha * theta),
+                       2 * alpha * (alpha - 1) * r**(alpha - 2) * cos((1 - alpha) * theta) + r**alpha * cos(alpha * theta)])
         f = Function(V).interpolate(f_expr)
 
         F = (inner(curl(uh), curl(v)) + inner(uh, v) - inner(f,v)) * dx
@@ -70,8 +70,8 @@ def run_system(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3):
         v = CellVolume(mesh)
 
         # no boundary term since E \times n = 0 
-        # A X (B X C) = B (A dot C) - C (A dot B)
-        curl_E_cross_n = uh * div(n) - n * div(uh)
+        # grad X (E X n) = E div(n) - n div(E) + n dot grad(E) - E dot grad(n) 
+        curl_E_cross_n = uh * div(n) - n * div(uh) + dot(n, grad(uh)) - dot(uh, grad(n))
         G = (
             inner(eta_sq / v, w) * dx 
             - inner(h**2 * (curl(curl(uh)) + uh - f)**2, w) * dx
@@ -113,10 +113,21 @@ def run_system(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3):
 
         refined_mesh = mesh.refine_marked_elements(markers)
         return refined_mesh
+    
+    def generate_u_real(mesh, p, alpha):
+        V = FunctionSpace(mesh, "N1curl", p)
+        alpha = Constant(alpha)
+        x, y = SpatialCoordinate(mesh)
+        r = sqrt(x**2 + y**2)
+        theta = atan2(y, x)
+        theta = conditional(lt(theta, 0), theta + 2 * pi, theta) # map to [0 , 2pi]
+        u_real = Function(V).interpolate(as_vector([-r**alpha * sin(alpha * theta), r**alpha * cos(alpha * theta)]))
+        return u_real
 
 
-    rect1 = WorkPlane(Axes((0,0,0), n=Z, h=X)).Rectangle(1,2).Face()
-    rect2 = WorkPlane(Axes((0,1,0), n=Z, h=X)).Rectangle(2,1).Face()
+
+    rect1 = WorkPlane(Axes((-1,-1,0), n=Z, h=X)).Rectangle(1,2).Face()
+    rect2 = WorkPlane(Axes((-1,0,0), n=Z, h=X)).Rectangle(2,1).Face()
     L = rect1 + rect2
 
     geo = OCCGeometry(L, dim=2)
@@ -228,7 +239,7 @@ def run_system(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3):
             u_prev.interpolate(uh)
                         
             start = time.time()
-            (uh, f) = solve_maxwell(mesh, p, alpha, uh, patch_relax, uniform)
+            (uh, f) = solve_maxwell(mesh, p, alpha, uh, chol, uniform)
             times.append(time.time() - start)
 
             (eta, error_est) = estimate_error(mesh, uh, f) 
@@ -246,6 +257,8 @@ def run_system(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3):
 
         u_k = Function(V).interpolate(uh)
         if level % 10 == 0 or level < 15:
+            u_real = generate_u_real(mesh, p, alpha)
+            VTKFile(f"output/maxwell_L/theta={theta}_lam={lam_alg}_alpha={alpha}_dim={dim}/{p}/real_{level}.pvd").write(u_real)
             VTKFile(f"output/maxwell_L/theta={theta}_lam={lam_alg}_alpha={alpha}_dim={dim}/{p}/{level}_{k}.pvd").write(uh)
         k_l.append(k)
 
@@ -270,7 +283,7 @@ if __name__ == "__main__":
     theta = 0.5
     lambda_alg = 0.01
     alpha = 2/3
-    dim = 1e3
+    dim = 1e4
 
 
     errors_true = {}

@@ -174,6 +174,8 @@ def get_c2f_f2c_fd(mesh, coarse_mesh):
     c2f = [[] for _ in range(num_parents)]
     f2c = [[] for _ in range(mesh.num_cells())]
 
+    if parents.shape[0] == 0:
+        raise Exception("Added mesh has not refined any cells")
     for l,_ in enumerate(elements):
         if parents[l][0] == -1 or l < num_parents:
             f2c[fine_mapping(l)].append(coarse_mapping(l))

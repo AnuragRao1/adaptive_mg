@@ -25,9 +25,8 @@ from adaptive_transfer_manager import AdaptiveTransferManager
 def run_system(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3):
     def solve_div(mesh, p, alpha, u_prev, params, uniform):
         V = FunctionSpace(mesh, "BDM", p,)
-        W = FunctionSpace(mesh, "DG", p-1)
         uh = u_prev
-        v = TestFunction(W)
+        v = TestFunction(V)
         bc = DirichletBC(V, Constant((0.0, 0.0)), "on_boundary")
         alpha = Constant(alpha)
 
@@ -36,13 +35,12 @@ def run_system(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3):
         theta = atan2(y, x)
         theta = conditional(lt(theta, 0), theta + 2 * pi, theta) # map to [0 , 2pi]
 
-        f_expr = (alpha + 1) * r**(alpha - 1)
-        f = Function(W).interpolate(f_expr)
+        f_expr = as_vector([(r**alpha - (alpha**2 - 1) * r**(alpha - 2)) * cos(theta), (r**alpha - (alpha**2 - 1) * r**(alpha - 2)) * sin(theta)])
+        f = Function(V).interpolate(f_expr)
 
-        a = inner(div(uh), v) * dx
-        L = inner(f, v) * dx
+        F = (inner(uh,v) + inner(div(uh), div(v)) - inner(f, v)) * dx
 
-        problem = LinearVariationalProblem(a, L, uh, bc)
+        problem = NonlinearVariationalProblem(F, uh, bc)
 
         if not uniform:
             dm = uh.function_space().dm
@@ -50,7 +48,7 @@ def run_system(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3):
             mat_type = params["mat_type"]
             appctx = _SNESContext(problem, mat_type, mat_type, old_appctx)
             appctx.transfer_manager = atm
-            solver = LinearVariationalSolver(problem, solver_parameters=params)
+            solver = NonlinearVariationalSolver(problem, solver_parameters=params)
             solver.set_transfer_manager(atm)
             # with dmhooks.add_hooks(dm, solver, appctx=appctx, save=False):
             #     coarsen(problem, coarsen)
@@ -72,11 +70,15 @@ def run_system(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3):
 
         G = (
             inner(eta_sq / v, w) * dx 
-            - inner(h**2 * (div(uh) - f)**2, w) * dx
+            - inner(h**2 * (uh - grad(div(uh)) - f)**2, w) * dx
+            - inner(h('+') * jump(div(uh))**2, w('+')) * dS
+            - inner(h('-') * jump(div(uh))**2, w('-')) * dS
             )
         
         eta_vol = assemble(inner(h**2 * (curl(curl(uh)) + uh - f)**2, w) * dx)
-        print(f"Vol: {sqrt(sum(eta_vol.dat.data))}")
+        eta_jump = assemble(inner(h('+') * jump(div(uh))**2, w('+')) * dS
+            + inner(h('-') * jump(div(uh))**2, w('-')) * dS)
+        print(f"Vol: {sqrt(sum(eta_vol.dat.data))}, Jump: {sqrt(sum(eta_jump.dat.data))}")
         
         sp = {"mat_type": "matfree", "ksp_type": "richardson", "pc_type": "jacobi"}
         solve(G == 0, eta_sq, solver_parameters=sp)
@@ -108,9 +110,21 @@ def run_system(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3):
         refined_mesh = mesh.refine_marked_elements(markers)
         return refined_mesh
 
+    def generate_u_real(mesh, p, alpha):
+        V = FunctionSpace(mesh, "BDM", p)
+        alpha = Constant(alpha)
+        x, y = SpatialCoordinate(mesh)
+        r = sqrt(x**2 + y**2)
+        theta = atan2(y, x)
+        theta = conditional(lt(theta, 0), theta + 2 * pi, theta) # map to [0 , 2pi]
+        u_real = Function(V).interpolate(as_vector([r**alpha * cos(theta), r**alpha * sin(theta)]))
+        return u_real
 
-    rect1 = WorkPlane(Axes((0,0,0), n=Z, h=X)).Rectangle(1,2).Face()
-    rect2 = WorkPlane(Axes((0,1,0), n=Z, h=X)).Rectangle(2,1).Face()
+
+
+
+    rect1 = WorkPlane(Axes((-1,-1,0), n=Z, h=X)).Rectangle(1,2).Face()
+    rect2 = WorkPlane(Axes((-1,0,0), n=Z, h=X)).Rectangle(2,1).Face()
     L = rect1 + rect2
 
     geo = OCCGeometry(L, dim=2)
@@ -240,6 +254,8 @@ def run_system(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3):
 
         u_k = Function(V).interpolate(uh)
         if level % 10 == 0 or level < 15:
+            u_real = generate_u_real(mesh, p, alpha)
+            VTKFile(f"output/div_L/theta={theta}_lam={lam_alg}_alpha={alpha}_dim={dim}/{p}/real_{level}.pvd").write(u_real)
             VTKFile(f"output/div_L/theta={theta}_lam={lam_alg}_alpha={alpha}_dim={dim}/{p}/{level}_{k}.pvd").write(uh)
         k_l.append(k)
 
@@ -264,7 +280,7 @@ if __name__ == "__main__":
     theta = 0.5
     lambda_alg = 0.01
     alpha = 2/3
-    dim = 1e3
+    dim = 1e4
 
 
     errors_true = {}
