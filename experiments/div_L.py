@@ -12,7 +12,6 @@ from itertools import accumulate
 
 import time
 import csv
-import ufl
 
 import sys
 import os
@@ -24,10 +23,11 @@ from adaptive_transfer_manager import AdaptiveTransferManager
     
 def run_system(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3):
     def solve_div(mesh, p, alpha, u_prev, u_real, params, uniform):
-        V = FunctionSpace(mesh, "BDM", p,)
+        V = FunctionSpace(mesh, "BDM", p)
+        W = FunctionSpace(mesh, "BDM", p) 
         uh = u_prev
-        v = TestFunction(V)
-        bc = DirichletBC(V, Constant((0.0, 0.0)), "on_boundary")
+        v = TestFunction(W)
+        bc = DirichletBC(V, u_real, "on_boundary")
         alpha = Constant(alpha)
 
         x, y = SpatialCoordinate(mesh)
@@ -60,7 +60,7 @@ def run_system(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3):
         return uh, f
 
 
-    def estimate_error(mesh, uh, f):
+    def estimate_error(mesh, uh, u_real, f):
         W = FunctionSpace(mesh, "DG", 0)
         eta_sq = Function(W)
         w = TestFunction(W)
@@ -71,14 +71,17 @@ def run_system(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3):
         G = (
             inner(eta_sq / v, w) * dx 
             - inner(h**2 * (uh - grad(div(uh)) - f)**2, w) * dx
+            - inner(h**2 * (grad(uh - grad(div(uh)) - f)**2), w) * dx # added from H(div) norm
             - inner(h('+') * jump(div(uh))**2, w('+')) * dS
             - inner(h('-') * jump(div(uh))**2, w('-')) * dS
+            - inner(h * dot(u_real - uh, n)**2, w) * ds
             )
         
-        eta_vol = assemble(inner(h**2 * (uh - grad(div(uh)) - f)**2, w) * dx)
+        eta_vol = assemble(inner(h**2 * (uh - grad(div(uh)) - f)**2, w) * dx + inner(h**2 * (grad(uh - grad(div(uh)) - f)**2), w) * dx)
         eta_jump = assemble(inner(h('+') * jump(div(uh))**2, w('+')) * dS
             + inner(h('-') * jump(div(uh))**2, w('-')) * dS)
-        print(f"Vol: {sqrt(sum(eta_vol.dat.data))}, Jump: {sqrt(sum(eta_jump.dat.data))}")
+        eta_boundary = assemble(inner(h * dot(grad(u_real - uh), n)**2, w) * ds)
+        print(f"Vol: {sqrt(sum(eta_vol.dat.data))}, Jump: {sqrt(sum(eta_jump.dat.data))}, Boundary: {sqrt(sum(eta_boundary.dat.data))}")
         
         sp = {"mat_type": "matfree", "ksp_type": "richardson", "pc_type": "jacobi"}
         solve(G == 0, eta_sq, solver_parameters=sp)
@@ -128,7 +131,7 @@ def run_system(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3):
     L = rect1 + rect2
 
     geo = OCCGeometry(L, dim=2)
-    ngmsh = geo.GenerateMesh(maxh=0.5)
+    ngmsh = geo.GenerateMesh(maxh=0.1)
     mesh = Mesh(ngmsh)
 
 
@@ -244,7 +247,7 @@ def run_system(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3):
                 VTKFile(f"output/div_L/theta={theta}_lam={lam_alg}_alpha={alpha}_dim={dim}/{p}/real_{level}.pvd").write(u_real)
                 VTKFile(f"output/div_L/theta={theta}_lam={lam_alg}_alpha={alpha}_dim={dim}/{p}/{level}_{k}.pvd").write(uh)
 
-            (eta, error_est) = estimate_error(mesh, uh, f) 
+            (eta, error_est) = estimate_error(mesh, uh, u_real, f) 
             print("ERROR ESTIMATE: ", error_est)
 
             if level not in error_estimators:
@@ -281,7 +284,7 @@ if __name__ == "__main__":
     theta = 0.5
     lambda_alg = 0.01
     alpha = 2/3
-    dim = 1e6
+    dim = 1e4
 
 
     errors_true = {}
@@ -289,7 +292,7 @@ if __name__ == "__main__":
     dofs = {}
     times = {}
    
-    for p in range(1,2):
+    for p in range(1,5):
         (dof, est, true, times) = run_system(p, theta, lambda_alg, alpha, dim)
 
         with open(f"output/div_L/theta={theta}_lam={lambda_alg}_alpha={alpha}_dim={dim}/{p}/dat.csv", "r", newline="") as f:

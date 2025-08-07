@@ -27,7 +27,7 @@ def run_system(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3):
         V = FunctionSpace(mesh, "N1curl", p)
         uh = u_prev
         v = TestFunction(V)
-        bc = DirichletBC(V, Constant((0.0,0.0)), "on_boundary")
+        bc = DirichletBC(V, u_real, "on_boundary")
         alpha = Constant(alpha)
 
         x, y = SpatialCoordinate(mesh)
@@ -62,29 +62,33 @@ def run_system(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3):
         return uh, f
 
 
-    def estimate_error(mesh, uh, f):
+    def estimate_error(mesh, uh, u_real, f):
         W = FunctionSpace(mesh, "DG", 0)
         eta_sq = Function(W)
         w = TestFunction(W)
         h = CellDiameter(mesh) 
         n = FacetNormal(mesh)
+        t = as_vector([-n[1], n[0]])
         v = CellVolume(mesh)
 
         # no boundary term since E \times n = 0 
         # grad X (E X n) = E div(n) - n div(E) + n dot grad(E) - E dot grad(n) 
-        # curl_E_cross_n = uh * div(n) - n * div(uh) + dot(n, grad(uh)) - dot(uh, grad(n))
-        curl_E_cross_n = curl(cross(uh,n))
+        curl_E_cross_n = uh * div(n) - n * div(uh) + dot(n, grad(uh)) - dot(uh, grad(n))
+        # curl_E_cross_n = curl(cross(uh,n))
         G = (
             inner(eta_sq / v, w) * dx 
             - inner(h**2 * (curl(curl(uh)) + uh - f)**2, w) * dx
+            - inner(h**2 * curl(curl(curl(uh)) + uh - f)**2, w) * dx # added from H(curl) norm
             - inner(h('+') * jump(curl_E_cross_n, n)**2, w('+')) * dS
             - inner(h('-') * jump(curl_E_cross_n, n)**2, w('-')) * dS
+            - inner(h * dot(u_real - uh, t)**2, w) * ds
             )
         
-        eta_vol = assemble(inner(h**2 * (curl(curl(uh)) + uh - f)**2, w) * dx)
+        eta_vol = assemble(inner(h**2 * (curl(curl(uh)) + uh - f)**2, w) * dx + inner(h**2 * curl(curl(curl(uh)) + uh - f)**2, w) * dx)
         eta_jump = assemble(inner(h('+') * jump(curl_E_cross_n, n)**2, w('+')) * dS
             + inner(h('-') * jump(curl_E_cross_n, n)**2, w('-')) * dS)
-        print(f"Vol: {sqrt(sum(eta_vol.dat.data))}, Jump: {sqrt(sum(eta_jump.dat.data))}")
+        eta_boundary = assemble(inner(h * dot(u_real - uh, t)**2, w) * ds)
+        print(f"Vol: {sqrt(sum(eta_vol.dat.data))}, Jump: {sqrt(sum(eta_jump.dat.data))}, Boundary: {sqrt(sum(eta_boundary.dat.data))}")
         
         sp = {"mat_type": "matfree", "ksp_type": "richardson", "pc_type": "jacobi"}
         solve(G == 0, eta_sq, solver_parameters=sp)
@@ -246,7 +250,7 @@ def run_system(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3):
             (uh, f) = solve_maxwell(mesh, p, alpha, uh, u_real, chol, uniform)
             times.append(time.time() - start)
 
-            (eta, error_est) = estimate_error(mesh, uh, f) 
+            (eta, error_est) = estimate_error(mesh, uh, u_real, f) 
             print("ERROR ESTIMATE: ", error_est)
 
             if level not in error_estimators:
@@ -286,7 +290,7 @@ if __name__ == "__main__":
     theta = 0.5
     lambda_alg = 0.01
     alpha = 2/3
-    dim = 1e5
+    dim = 1e4
 
 
     errors_true = {}

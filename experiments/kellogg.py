@@ -336,7 +336,7 @@ if __name__ == "__main__":
 
     theta = 0.5
     lambda_alg = 0.01
-    dim = 1e3
+    dim = 1e5 - 1
 
 
     errors_true = {}
@@ -344,7 +344,7 @@ if __name__ == "__main__":
     dofs = {}
     times = {}
    
-    for p in range(2,3):
+    for p in range(1,2):
         (dof, est, true, times) = run_system(p, theta, lambda_alg, dim)
 
         with open(f"output/kellogg/theta={theta}_lam={lambda_alg}_dim={dim}/{p}/dat.csv", "r", newline="") as f:
