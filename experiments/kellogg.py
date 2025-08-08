@@ -22,7 +22,7 @@ from adaptive_transfer_manager import AdaptiveTransferManager
 from firedrake.petsc import PETSc
 
     
-def run_system(p=2, theta=0.5, lam_alg=0.01, dim=1e3):
+def run_kellogg(p=2, theta=0.5, lam_alg=0.01, dim=1e3, solver="direct"):
     def solve_kellogg(mesh, p, u_prev, u_real, params, uniform):
         V = FunctionSpace(mesh, "CG", p)
         uh = u_prev
@@ -58,7 +58,6 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, dim=1e3):
         W = FunctionSpace(mesh, "DG", 0)
         eta_sq = Function(W)
         w = TestFunction(W)
-        h = CellDiameter(mesh) 
         n = FacetNormal(mesh)
         t = as_vector([-n[1], n[0]])
         v = CellVolume(mesh)
@@ -85,7 +84,6 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, dim=1e3):
         solve(G == 0, eta_sq, solver_parameters=sp)
 
         eta = Function(W).interpolate(sqrt(eta_sq))  # compute eta from eta^2
-        # VTKFile(f"output/kellogg/theta={theta}_lam={lam_alg}_dim={dim}/{p}/eta_{level}.pvd").write(eta)
 
 
         with eta.dat.vec_ro as eta_:  # compute estimate for error in energy norm
@@ -111,8 +109,7 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, dim=1e3):
         refined_mesh = mesh.refine_marked_elements(markers)
         return refined_mesh
     
-    def generate_u_real(mesh, p):
-        u_real = Function(FunctionSpace(mesh, "CG", p), name="u_real")
+    def generate_u_real(mesh):
         x, y = SpatialCoordinate(mesh)
 
         r = sqrt(x**2 + y**2)
@@ -138,17 +135,9 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, dim=1e3):
         )
 
         u_expr = r**alpha * mu
-        u_real.interpolate(u_expr)
-        return u_real
+        return u_expr
 
 
-    # BUILD DOMAIN
-    # wp = WorkPlane()
-    # square = wp.Rectangle(2.0,2.0).Face()
-    # square = square.Move(Vec(-1.0, -1.0, 0))
-    # geo = OCCGeometry(square, dim=2)
-    # ngmesh = geo.GenerateMesh(maxh=2) 
-    
     from netgen.geom2d import unit_square
 
     from netgen.meshing import Mesh as NetgenMesh
@@ -242,6 +231,10 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, dim=1e3):
             "ksp_type": "preonly",
             "pc_type": "cholesky",
             "pc_factor_mat_solver_type": "mumps"}
+    if solver == "direct":
+        param_set = chol
+    if solver == "mg":
+        param_set = patch_relax
 
     # ITERATIVE LOOP
 
@@ -261,7 +254,7 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, dim=1e3):
     start_time = time.time()
     times.append(start_time)
     level = 0
-    csv_file = f"output/kellogg/theta={theta}_lam={lam_alg}_dim={dim}/{p}/dat.csv"
+    csv_file = f"output/kellogg_{solver}/theta={theta}_lam={lam_alg}_dim={dim}/{p}/dat.csv"
     os.makedirs(os.path.dirname(csv_file), exist_ok=True)
 
     with open(csv_file, mode='w', newline='') as f:
@@ -284,14 +277,14 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, dim=1e3):
         k = 0
         error_est = 0
 
-        u_real = generate_u_real(mesh, p)        
+        u_real = generate_u_real(mesh)        
 
         while norm(uh - u_prev) > lam_alg * error_est or k == 0:
             k += 1
             u_prev.interpolate(uh)
                         
             start = time.time()
-            uh = solve_kellogg(mesh, p, uh, u_real, patch_relax, uniform)
+            uh = solve_kellogg(mesh, p, uh, u_real, param_set, uniform)
             times.append(time.time() - start)
 
             (eta, error_est) = estimate_error(mesh, uh, u_real) 
@@ -313,7 +306,9 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, dim=1e3):
 
         u_k = Function(V).interpolate(uh)
         if level % 10 == 0 or level < 15:
-            VTKFile(f"output/kellogg/theta={theta}_lam={lam_alg}_dim={dim}/{p}/{level}_{k}.pvd").write(uh)
+            ur = Function(V, name="exact").interpolate(u_real)
+            eh = Function(V, name="error").interpolate(ur - uh)
+            VTKFile(f"output/kellogg_{solver}/theta={theta}_lam={lam_alg}_dim={dim}/{p}/{level}_{k}.pvd").write(uh, ur, eh)
         k_l.append(k)
 
         if not uniform:
@@ -331,171 +326,10 @@ def run_system(p=2, theta=0.5, lam_alg=0.01, dim=1e3):
     
 
 if __name__ == "__main__":
-    import matplotlib.pyplot as plt
-    import numpy as np
-
     theta = 0.5
     lambda_alg = 0.01
-    dim = 1e5 - 1
-
-
-    errors_true = {}
-    errors_est = {}
-    dofs = {}
-    times = {}
-   
-    for p in range(1,2):
-        (dof, est, true, times) = run_system(p, theta, lambda_alg, dim)
-
-        with open(f"output/kellogg/theta={theta}_lam={lambda_alg}_dim={dim}/{p}/dat.csv", "r", newline="") as f:
-            reader = csv.reader(f)
-            rows = list(reader)
-        
-        columns = list(zip(*rows))
-        dofs[p] = np.array(columns[0][1:], dtype=float)
-        errors_est[p] = np.array(columns[1][1:], dtype=float)
-        errors_true[p] = np.array(columns[2][1:], dtype=float)
-        times = np.array(columns[4][1:], dtype=float)
-
-        dof = dofs[p]
-        est = errors_est[p]
-
-        plt.figure(figsize=(8, 6))
-        plt.grid(True)
-        plt.loglog(dof[1:], est[1:], '-ok', alpha = 0.7, markersize = 4)
-        scaling = est[1] / dof[1]**-0.5
-        plt.loglog(dof[1:], scaling * dof[1:]**-0.5, '--', alpha=0.5, color="lightcoral", label="x^{-0.5}")
-        scaling = est[1] / dof[1]**-0.1
-        plt.loglog(dof[1:], scaling * dof[1:]**-0.1, '--', alpha = 0.5, color='lawngreen', label = "x^{-0.1}")
-        scaling = est[1] / dof[1]**-1
-        plt.loglog(dof[1:], scaling * dof[1:]**-1, '--', alpha = 0.5, color = 'aqua', label = "x^{-1}")
-        scaling = est[1] / dof[1]**-2
-        plt.loglog(dof[1:], scaling * dof[1:]**-2, '--', alpha = 0.5, color = 'indigo', label = "x^{-2}")
-        plt.xlabel("Number of degrees of freedom")
-        plt.ylabel(r"Estimated energy norm $\sqrt{\sum_K \eta_K^2}$")
-        plt.title(f"Estimated Error Convergence p={p}, Multigrid")
-        plt.legend()
-        plt.savefig(f"output/kellogg/theta={theta}_lam={lambda_alg}_dim={dim}/{p}/single_convergence.png")
-
-
-    # for p in range(1,5):
-    #     dofs[p] = np.load(f"output/kellogg/theta={theta}_lam={lambda_alg}_dim={dim}/{p}/dofs.npy", allow_pickle=True)
-    #     errors_est[p] = np.load(f"output/kellogg/theta={theta}_lam={lambda_alg}_dim={dim}/{p}/errors_estimator.npy", allow_pickle=True)
-    #     errors_true[p] = np.load(f"output/kellogg/theta={theta}_lam={lambda_alg}_dim={dim}/{p}/errors_true.npy", allow_pickle=True)
-    #     times[p] = np.load(f"output/kellogg/theta={theta}_lam={lambda_alg}_dim={dim}/{p}/times.npy", allow_pickle=True)
-
-
-    # # for i, dat in enumerate(zip(dofs[2].item()[2], errors_est[2])):
-    # #     print(i, dat, times[2][i])
-
-    # colors = ['blue', 'green', 'red', 'purple']  
-    # plt.figure(figsize=(8, 6))
-    # plt.grid(True)
-    # for p in range(4):
-    #     plt.loglog(dofs[p+1], errors_est[p+1], '-o', color=colors[p], alpha = 0.5, markersize=2.5, label=f"p={p+1}")
-
-    # plt.xlabel("Number of degrees of freedom")
-    # plt.ylabel(r"Estimated energy norm $\sqrt{\sum_K \eta_K^2}$")
-    # plt.legend()
-    # plt.title("Estimated Error Convergence")
-    # plt.savefig(f"output/kellogg/theta={theta}_lam={lambda_alg}_dim={dim}/adaptive_convergence_est.png")
-
-
-    # plt.figure(figsize=(8, 6))
-    # plt.grid(True)
-    # for p in range(4):
-    #     plt.loglog(dofs[p+1], errors_true[p+1], '-.', color=colors[p], alpha = 0.5, label=f"p={p+1}")
-
-    # plt.xlabel("Number of degrees of freedom")
-    # plt.ylabel(r"True error norm $\|u - u_h\|$")
-    # plt.legend()
-    # plt.title("True Error Convergence")
-    # plt.savefig(f"output/kellogg/theta={theta}_lam={lambda_alg}_dim={dim}/adaptive_convergence_true.png")
-
-    # plt.show()
-
-
-    # #### SINGLE SAMPLE
-    # p = 1
-    # (dofs, errors_est, errors_true, times) = run_system(p, theta, lambda_alg, levels)
-    # np.save(f"output/kellogg/theta={theta}_lam={lambda_alg}_dim={dim}/{p}/dofs.npy", dofs)
-    # np.save(f"output/kellogg/theta={theta}_lam={lambda_alg}_dim={dim}/{p}/errors_estimator.npy", errors_est)
-    # np.save(f"output/kellogg/theta={theta}_lam={lambda_alg}_dim={dim}/{p}/errors_true.npy", errors_true)
-    # np.save(f"output/kellogg/theta={theta}_lam={lambda_alg}_dim={dim}/{p}/times.npy", times)
-
-
-
-
+    dim = 250000 - 1
 
    
-    # plt.figure(figsize=(8, 6))
-    # plt.grid(True)
-    # plt.loglog(dofs[1:], errors_est[1:], '-ok')
-    # scaling = errors_est[1] / dofs[1]**-0.5
-    # plt.loglog(dofs, scaling * dofs**-0.5, '--', alpha=0.5, color="lightcoral", label="x^{-0.5}")
-    # scaling = errors_est[1] / dofs[1]**-0.1
-    # plt.loglog(dofs, scaling * dofs**-0.1, '--', alpha = 0.5, color='lawngreen', label = "x^{-0.1}")
-    # scaling = errors_est[1] / dofs[1]**-1
-    # plt.loglog(dofs, scaling * dofs**-1, '--', alpha = 0.5, color = 'aqua', label = "x^{-1}")
-    # scaling = errors_est[1] / dofs[1]**-2
-    # plt.loglog(dofs, scaling * dofs**-2, '--', alpha = 0.5, color = 'indigo', label = "x^{-2}")
-
-
-
-
-    # plt.xlabel("Number of degrees of freedom")
-    # plt.ylabel(r"Estimated energy norm $\sqrt{\sum_K \eta_K^2}$")
-    # plt.title(f"Estimated Error Convergence p={p}")
-    # plt.legend()
-    # plt.savefig(f"output/kellogg/theta={theta}_lam={lambda_alg}_dim={dim}/{p}/adaptive_convergence_est.png")
-
-
-    # plt.figure(figsize=(8, 6))
-    # plt.grid(True)
-    # plt.loglog(dofs[1:], errors_true[1:], '-.')
-
-    # plt.xlabel("Number of degrees of freedom")
-    # plt.ylabel(r"True error norm $\|u - u_h\|$")
-    # plt.title(f"True Error Convergence p={p}")
-
-    # plt.savefig(f"output/kellogg/theta={theta}_lam={lambda_alg}_dim={dim}/{p}/adaptive_convergence_true.png")
-
-    # plt.show()
-
-    # TIME: 
-    # p = 1
-    # d_est = np.load(f"output/kellogg/theta={theta}_lam={lambda_alg}_dim={dim}/{p}/errors_estimator.npy", allow_pickle=True)
-    # d_times = np.load(f"output/kellogg/theta={theta}_lam={lambda_alg}_dim={dim}/{p}/times.npy", allow_pickle=True)[1:] 
-    # d_times = np.array(list(accumulate(d_times)))
-
-    # with open(f"output/kellogg/theta={theta}_lam={lambda_alg}_dim={dim - 1}/{p}/dat.csv", "r", newline="") as f:
-    #     reader = csv.reader(f)
-    #     rows = list(reader)
-
-    # # Transpose rows to get columns
-    # columns = list(zip(*rows))
-    # est = np.array(columns[1][1:], dtype=float)
-    # times = np.array(columns[4][1:], dtype=float)
-
-    # times = np.array(list(accumulate(times)))
-    # print(times)
-    # colors = ['blue', 'green', 'red', 'purple'] 
-    # c = colors[p-1]
-    # plt.figure(figsize=(8, 6))
-    # plt.grid(True)
-    # plt.loglog(times, est, '-o', alpha = 0.6, color=c, markersize = 3, label = "Multigrid")
-    # plt.loglog(d_times, d_est, '-ok', alpha = 0.6, markersize = 3, label = "Direct")
-    # scaling = est[0] / times[0]**-0.5
-    # plt.loglog(times, scaling * times**-0.5, '--', alpha=0.5, color="lightcoral", label="t^{-0.5}")
-    # scaling = est[0] / times[0]**-0.1
-    # plt.loglog(times, scaling * times**-0.1, '--', alpha = 0.5, color='lawngreen', label = "t^{-0.1}")
-    # scaling = est[0] / times[0]**-1
-    # plt.loglog(times, scaling * times**-1, '--', alpha = 0.5, color = 'aqua', label = "t^{-1}")
-    # scaling = est[0] / times[0]**-2
-    # plt.loglog(times, scaling * times**-2, '--', alpha = 0.5, color = 'indigo', label = "t^{-2}")
-    # plt.xlabel("Cumulative Runtime")
-    # plt.ylabel(r"Estimated energy norm $\sqrt{\sum_K \eta_K^2}$")
-    # plt.title(f"Estimator vs Cumulative Runtime for p={p}")
-    # plt.legend()
-    # plt.savefig(f"output/kellogg/theta={theta}_lam={lambda_alg}_dim={dim - 1}/{p}/direct_vs_mg_runtime.png")
-    # plt.show()
+    for p in range(3,4):
+        (dof, est, true, times) = run_kellogg(p, theta, lambda_alg, dim)

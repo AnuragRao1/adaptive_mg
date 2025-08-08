@@ -7,12 +7,10 @@ from firedrake.dmhooks import get_appctx
 from firedrake import dmhooks
 from firedrake.solving_utils import _SNESContext
 from firedrake.mg.utils import get_level
-from itertools import accumulate
 
 
 import time
 import csv
-import ufl
 
 import sys
 import os
@@ -20,18 +18,20 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from adaptive import AdaptiveMeshHierarchy
 from adaptive_transfer_manager import AdaptiveTransferManager
 
+from firedrake.petsc import PETSc
 
     
-def run_maxwell(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "direct"):
-    def solve_maxwell(mesh, p, u_prev, u_real, params, uniform):
-        V = FunctionSpace(mesh, "N1curl", p)
+def run_grad(p=2, theta=0.5, lam_alg=0.01, dim=1e3, solver="direct"):
+    def solve_grad(mesh, p, u_prev, u_real, params, uniform):
+        V = VectorFunctionSpace(mesh, "CG", p)
         uh = u_prev
         v = TestFunction(V)
         bc = DirichletBC(V, u_real, "on_boundary")
 
-        f_expr = curl(curl(u_real)) + u_real
-
-        F = (inner(curl(uh), curl(v)) + inner(uh, v) - inner(f_expr,v)) * dx
+        x = SpatialCoordinate(mesh)
+        a = conditional(lt(x[0] * x[1], 0), Constant(1.0), Constant(161.4476387975881)) # Leaving in this format resolves divergence of solver
+        F = inner(a * grad(uh), grad(v))*dx # f == 0, 
+        
         
         problem = NonlinearVariationalProblem(F, uh, bc)
 
@@ -50,42 +50,40 @@ def run_maxwell(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "di
         with PETSc.Log.Event(f"adaptive_{level}"):
             solver.solve()
 
-        return uh, f_expr
+        return uh
 
 
-    def estimate_error(mesh, uh, u_real, f):
+    def estimate_error(mesh, uh, u_boundary):
         W = FunctionSpace(mesh, "DG", 0)
         eta_sq = Function(W)
         w = TestFunction(W)
-        h = CellDiameter(mesh) 
         n = FacetNormal(mesh)
         t = as_vector([-n[1], n[0]])
         v = CellVolume(mesh)
 
-        # no boundary term since E \times n = 0 
-        # grad X (E X n) = E div(n) - n div(E) + n dot grad(E) - E dot grad(n) 
-        # curl_E_cross_n = uh * div(n) - n * div(uh) + dot(n, grad(uh)) - dot(uh, grad(n))
-        cross = lambda a,b: a[0] * b[1] - a[1] * b[0]
-        curl_E_cross_n = curl(cross(uh,n))
+        x = SpatialCoordinate(mesh)
+        a = conditional(lt(x[0] * x[1], 0), Constant(1.0), Constant(161.4476387975881))
+        a = Function(W).interpolate(a)
+
         G = (
             inner(eta_sq / v, w) * dx 
-            - inner(h**2 * (curl(curl(uh)) + uh - f)**2, w) * dx
-            - inner(h**2 * curl(curl(curl(uh)) + uh - f)**2, w) * dx # added from H(curl) norm
-            - inner(h('+') * jump(curl_E_cross_n, n)**2, w('+')) * dS
-            - inner(h('-') * jump(curl_E_cross_n, n)**2, w('-')) * dS
-            - inner(h * dot(u_real - uh, t)**2, w) * ds
+            - inner(v * div(a * grad(uh))**2, w) * dx 
+            - inner(v('+')**0.5 * jump(a * grad(uh), n)**2, w('+')) * dS
+            - inner(v('-')**0.5 * jump(a * grad(uh), n)**2, w('-')) * dS
+            - inner(v**0.5 * dot(grad(u_boundary - uh), t)**2, w) * ds
             )
         
-        eta_vol = assemble(inner(h**2 * (curl(curl(uh)) + uh - f)**2, w) * dx + inner(h**2 * curl(curl(curl(uh)) + uh - f)**2, w) * dx)
-        eta_jump = assemble(inner(h('+') * jump(curl_E_cross_n, n)**2, w('+')) * dS
-            + inner(h('-') * jump(curl_E_cross_n, n)**2, w('-')) * dS)
-        eta_boundary = assemble(inner(h * dot(u_real - uh, t)**2, w) * ds)
+        eta_vol = assemble(inner(v * div(a * grad(uh))**2, w) * dx)
+        eta_jump = assemble(inner(v('+')**0.5 * jump(a * grad(uh), n)**2, w('+')) * dS
+            + inner(v('-')**0.5 * jump(a * grad(uh), n)**2, w('-')) * dS)
+        eta_boundary = assemble(inner(v**0.5 * dot(grad(u_boundary - uh), t)**2, w) * ds)
         print(f"Vol: {sqrt(sum(eta_vol.dat.data))}, Jump: {sqrt(sum(eta_jump.dat.data))}, Boundary: {sqrt(sum(eta_boundary.dat.data))}")
         
         sp = {"mat_type": "matfree", "ksp_type": "richardson", "pc_type": "jacobi"}
         solve(G == 0, eta_sq, solver_parameters=sp)
 
         eta = Function(W).interpolate(sqrt(eta_sq))  # compute eta from eta^2
+
 
         with eta.dat.vec_ro as eta_:  # compute estimate for error in energy norm
             error_est = sqrt(eta_.dot(eta_))
@@ -110,26 +108,70 @@ def run_maxwell(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "di
         refined_mesh = mesh.refine_marked_elements(markers)
         return refined_mesh
     
-    def generate_u_real(mesh, p, alpha):
-        V = FunctionSpace(mesh, "N1curl", p)
-        alpha = Constant(alpha)
+    def generate_u_real(mesh):
         x, y = SpatialCoordinate(mesh)
+
         r = sqrt(x**2 + y**2)
-        theta = atan2(y, x)
-        theta = conditional(lt(theta, 0), theta + 2 * pi, theta) # map to [0 , 2pi]
-        u_real = as_vector([-r**alpha * sin(alpha * theta), r**alpha * cos(alpha * theta)])
-        return u_real
+        phi = atan2(y, x)
+        phi = conditional(lt(phi, 0), phi + 2 * pi, phi) # map to [0 , 2pi]
+
+        alpha = Constant(0.1)
+        beta = Constant(-14.92256510455152)
+        delta = Constant(pi / 4)
+
+        mu = conditional(
+            lt(phi, pi/2),
+            cos((pi/2 - beta) * alpha) * cos((phi - pi/2 + delta) * alpha),
+            conditional(
+                lt(phi, pi),
+                cos(delta * alpha) * cos((phi - pi + beta) * alpha),
+                conditional(
+                    lt(phi, 3*pi/2),
+                    cos(beta * alpha) * cos((phi - pi - delta) * alpha),
+                    cos((pi/2 - delta) * alpha) * cos((phi - 3*pi/2 - beta) * alpha)
+                )
+            )
+        )
+
+        u_expr = as_vector([r**alpha * mu, r**alpha * mu])
+        return u_expr
+
+
+    from netgen.geom2d import unit_square
+
+    from netgen.meshing import Mesh as NetgenMesh
+    from netgen.meshing import MeshPoint, Element2D, FaceDescriptor, Element1D 
+    from netgen.csg import Pnt 
+    
+    ngmesh = NetgenMesh(dim=2) 
+    
+    fd = ngmesh.Add(FaceDescriptor(bc=1,domin=1,surfnr=1)) 
+    
+    pnums = [] 
+    pnums.append(ngmesh.Add(MeshPoint(Pnt(-1, -1, 0)))) 
+    pnums.append(ngmesh.Add(MeshPoint(Pnt(-1, 1, 0))))  
+    pnums.append(ngmesh.Add(MeshPoint(Pnt( 1, 1, 0))))  
+    pnums.append(ngmesh.Add(MeshPoint(Pnt( 1, -1, 0)))) 
+    pnums.append(ngmesh.Add(MeshPoint(Pnt( 0, 0, 0))))  
+    
+    ngmesh.Add(Element2D(fd, [pnums[0], pnums[1], pnums[4]]))  
+    ngmesh.Add(Element2D(fd, [pnums[1], pnums[2], pnums[4]]))  
+    ngmesh.Add(Element2D(fd, [pnums[2], pnums[3], pnums[4]]))  
+    ngmesh.Add(Element2D(fd, [pnums[3], pnums[0], pnums[4]])) 
+    
+    ngmesh.Add(Element1D([pnums[0], pnums[1]], index=1)) 
+    ngmesh.Add(Element1D([pnums[1], pnums[2]], index=1)) 
+    ngmesh.Add(Element1D([pnums[2], pnums[3]], index=1)) 
+    ngmesh.Add(Element1D([pnums[0], pnums[3]], index=1))
 
 
 
-    rect1 = WorkPlane(Axes((-1,-1,0), n=Z, h=X)).Rectangle(1,2).Face()
-    rect2 = WorkPlane(Axes((-1,0,0), n=Z, h=X)).Rectangle(2,1).Face()
-    L = rect1 + rect2
 
-    geo = OCCGeometry(L, dim=2)
-    ngmsh = geo.GenerateMesh(maxh=0.1)
-    mesh = Mesh(ngmsh)
-
+    for i in range(2):
+        for l, el in enumerate(ngmesh.Elements2D()):
+            el.refine = 1
+        ngmesh.Refine(adaptive=True)
+    mesh = Mesh(ngmesh)
 
     amh = AdaptiveMeshHierarchy([mesh])
     atm = AdaptiveTransferManager()
@@ -188,11 +230,11 @@ def run_maxwell(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "di
             "ksp_type": "preonly",
             "pc_type": "cholesky",
             "pc_factor_mat_solver_type": "mumps"}
-
     if solver == "direct":
         param_set = chol
     if solver == "mg":
         param_set = patch_relax
+
     # ITERATIVE LOOP
 
     # max_iterations = max_iterations
@@ -211,19 +253,19 @@ def run_maxwell(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "di
     start_time = time.time()
     times.append(start_time)
     level = 0
-    csv_file = f"output/maxwell_L_{solver}/theta={theta}_lam={lam_alg}_alpha={alpha}_dim={dim}/{p}/dat.csv"
+    csv_file = f"output/grad_{solver}/theta={theta}_lam={lam_alg}_dim={dim}/{p}/dat.csv"
     os.makedirs(os.path.dirname(csv_file), exist_ok=True)
 
     with open(csv_file, mode='w', newline='') as f:
         writer = csv.writer(f)
-        writer.writerow(["dof", "error_est","error_true", "k", "time"])
+        writer.writerow(["dof", "error_est", "error_true", "k", "time"])
 
     while level == 0 or u_k.function_space().dim() <= dim:
         if uniform:
             mesh = mh[level]
 
         print(f"level {level}")
-        V = FunctionSpace(mesh, "N1curl", p)
+        V = VectorFunctionSpace(mesh, "CG", p)
         uh = Function(V, name="solution")
         u_prev = Function(V, name="u_prev")
         dofs.append(uh.function_space().dim())
@@ -233,18 +275,18 @@ def run_maxwell(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "di
 
         k = 0
         error_est = 0
-        u_real = generate_u_real(mesh, p, alpha)
 
+        u_real = generate_u_real(mesh)        
 
         while norm(uh - u_prev) > lam_alg * error_est or k == 0:
             k += 1
             u_prev.interpolate(uh)
                         
             start = time.time()
-            (uh, f) = solve_maxwell(mesh, p, uh, u_real, param_set, uniform)
+            uh = solve_grad(mesh, p, uh, u_real, param_set, uniform)
             times.append(time.time() - start)
 
-            (eta, error_est) = estimate_error(mesh, uh, u_real, f) 
+            (eta, error_est) = estimate_error(mesh, uh, u_real) 
             print("ERROR ESTIMATE: ", error_est)
 
             if level not in error_estimators:
@@ -252,27 +294,30 @@ def run_maxwell(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "di
             else:
                 error_estimators[level].append(error_est)
             
-            error_real = norm(uh - u_real)
+            err_real = norm(uh - u_real)
+            true_errors.append(err_real)
             with open(csv_file, mode='a', newline='') as f:
                 writer = csv.writer(f)
-                writer.writerow([dofs[-1], error_est, error_real, k, times[-1]])
+                writer.writerow([dofs[-1], error_est, err_real, k, times[-1]])
+
+
 
 
         u_k = Function(V).interpolate(uh)
         if level % 10 == 0 or level < 15:
-                ur = Function(V, name="exact").interpolate(u_real)
-                eh = Function(V, name="error").interpolate(ur - uh)            
-                VTKFile(f"output/maxwell_L_{solver}/theta={theta}_lam={lam_alg}_alpha={alpha}_dim={dim}/{p}/{level}_{k}.pvd").write(uh, ur, eh)
+            ur = Function(V, name="exact").interpolate(u_real)
+            eh = Function(V, name="error").interpolate(ur - uh)
+            VTKFile(f"output/grad_{solver}/theta={theta}_lam={lam_alg}_dim={dim}/{p}/{level}_{k}.pvd").write(uh, ur, eh)
         k_l.append(k)
 
         if not uniform:
             mesh = adapt(mesh, eta)
             if u_k.function_space().dim() <= dim:
                 amh.add_mesh(mesh)
-                
         
         print(f"DOFS {dofs[-1]}: TIME {times[-1]}")
         level += 1
+
 
     final_errors = [error_estimators[key][-1] for key in error_estimators]
     return np.array(dofs, dtype=float), np.array(final_errors), np.array(true_errors), np.array(times)
@@ -282,11 +327,8 @@ def run_maxwell(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "di
 if __name__ == "__main__":
     theta = 0.5
     lambda_alg = 0.01
-    alpha = 2/3
-    dim = 1e4 - 1
-
-
+    dim = 1e4
+    solver = "direct"
+   
     for p in range(1,2):
-        (dof, est, true, times) = run_maxwell(p, theta, lambda_alg, alpha, dim)
-
-
+        (dof, est, true, times) = run_grad(p, theta, lambda_alg, dim, solver)
