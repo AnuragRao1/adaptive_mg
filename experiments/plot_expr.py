@@ -75,11 +75,15 @@ def plot_single_est_convergence(dir_name, p, system, solver, dof, est):
         plt.savefig(f"{dir_name}/{p}/single_convergence.png")
     
 def plot_joint_est_convergence(dir_name, system, solver, dofs, errors_est):
-    colors = ['blue', 'green', 'red', 'purple']  
+    colors = ['blue', 'green', 'red', 'purple']
+    scaling_exp = {1: -0.5, 2: -1, 3: -2, 4: -2}
     plt.figure(figsize=(8, 6))
     plt.grid(True)
     for p in range(4):
         plt.loglog(dofs[p+1], errors_est[p+1], '-o', color=colors[p], alpha = 0.5, markersize=2.5, label=f"p={p+1}")
+        scaling = errors_est[p+1][20] / dofs[p+1][20]**scaling_exp[p+1]
+        plt.loglog(dofs[p+1][20:],scaling * dofs[p+1][20:]**scaling_exp[p+1], '--', alpha=0.5, color= colors[p], label=f"x^{scaling_exp[p+1]}")
+
 
     plt.xlabel("Number of degrees of freedom")
     plt.ylabel(r"Estimated energy norm $\sqrt{\sum_K \eta_K^2}$")

@@ -110,15 +110,46 @@ def run_maxwell(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "di
         refined_mesh = mesh.refine_marked_elements(markers)
         return refined_mesh
     
+    # def generate_u_real(mesh, p, alpha):
+    #     V = FunctionSpace(mesh, "N1curl", p)
+    #     alpha = Constant(alpha)
+    #     x, y = SpatialCoordinate(mesh)
+    #     r = sqrt(x**2 + y**2)
+    #     theta = atan2(y, x)
+    #     theta = conditional(lt(theta, 0), theta + 2 * pi, theta) # map to [0 , 2pi]
+    #     u_real = as_vector([-r**alpha * sin(alpha * theta), r**alpha * cos(alpha * theta)])
+    #     return u_real
+    
     def generate_u_real(mesh, p, alpha):
-        V = FunctionSpace(mesh, "N1curl", p)
-        alpha = Constant(alpha)
+        u_real = Function(FunctionSpace(mesh, "CG", p), name="u_real")
         x, y = SpatialCoordinate(mesh)
+
         r = sqrt(x**2 + y**2)
-        theta = atan2(y, x)
-        theta = conditional(lt(theta, 0), theta + 2 * pi, theta) # map to [0 , 2pi]
-        u_real = as_vector([-r**alpha * sin(alpha * theta), r**alpha * cos(alpha * theta)])
+        phi = atan2(y, x)
+        phi = conditional(lt(phi, 0), phi + 2 * pi, phi) # map to [0 , 2pi]
+
+        alpha = Constant(0.1)
+        beta = Constant(-14.92256510455152)
+        delta = Constant(pi / 4)
+
+        mu = conditional(
+            lt(phi, pi/2),
+            cos((pi/2 - beta) * alpha) * cos((phi - pi/2 + delta) * alpha),
+            conditional(
+                lt(phi, pi),
+                cos(delta * alpha) * cos((phi - pi + beta) * alpha),
+                conditional(
+                    lt(phi, 3*pi/2),
+                    cos(beta * alpha) * cos((phi - pi - delta) * alpha),
+                    cos((pi/2 - delta) * alpha) * cos((phi - 3*pi/2 - beta) * alpha)
+                )
+            )
+        )
+
+        u_expr = r**alpha * mu
+        u_real = as_vector([u_expr, u_expr])
         return u_real
+
 
 
 
@@ -129,6 +160,33 @@ def run_maxwell(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "di
     geo = OCCGeometry(L, dim=2)
     ngmsh = geo.GenerateMesh(maxh=0.1)
     mesh = Mesh(ngmsh)
+
+
+    from netgen.meshing import Mesh as NetgenMesh
+    from netgen.meshing import MeshPoint, Element2D, FaceDescriptor, Element1D 
+    from netgen.csg import Pnt 
+    
+    ngmesh = NetgenMesh(dim=2) 
+    
+    fd = ngmesh.Add(FaceDescriptor(bc=1,domin=1,surfnr=1)) 
+    
+    pnums = [] 
+    pnums.append(ngmesh.Add(MeshPoint(Pnt(-1, -1, 0)))) 
+    pnums.append(ngmesh.Add(MeshPoint(Pnt(-1, 1, 0))))  
+    pnums.append(ngmesh.Add(MeshPoint(Pnt( 1, 1, 0))))  
+    pnums.append(ngmesh.Add(MeshPoint(Pnt( 1, -1, 0)))) 
+    pnums.append(ngmesh.Add(MeshPoint(Pnt( 0, 0, 0))))  
+    
+    ngmesh.Add(Element2D(fd, [pnums[0], pnums[1], pnums[4]]))  
+    ngmesh.Add(Element2D(fd, [pnums[1], pnums[2], pnums[4]]))  
+    ngmesh.Add(Element2D(fd, [pnums[2], pnums[3], pnums[4]]))  
+    ngmesh.Add(Element2D(fd, [pnums[3], pnums[0], pnums[4]])) 
+    
+    ngmesh.Add(Element1D([pnums[0], pnums[1]], index=1)) 
+    ngmesh.Add(Element1D([pnums[1], pnums[2]], index=1)) 
+    ngmesh.Add(Element1D([pnums[2], pnums[3]], index=1)) 
+    ngmesh.Add(Element1D([pnums[0], pnums[3]], index=1))
+    mesh = Mesh(ngmesh)
 
 
     amh = AdaptiveMeshHierarchy([mesh])

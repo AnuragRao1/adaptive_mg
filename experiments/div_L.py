@@ -64,13 +64,13 @@ def run_div(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "direct
         G = (
             inner(eta_sq / v, w) * dx 
             - inner(h**2 * (uh - grad(div(uh)) - f)**2, w) * dx
-            - inner(h**2 * (grad(uh - grad(div(uh)) - f)**2), w) * dx # added from H(div) norm
+            - inner(h**2 * (div(uh - grad(div(uh)) - f)**2), w) * dx # added from H(div) norm
             - inner(h('+') * jump(div(uh))**2, w('+')) * dS
             - inner(h('-') * jump(div(uh))**2, w('-')) * dS
             - inner(h * dot(u_real - uh, n)**2, w) * ds
             )
         
-        eta_vol = assemble(inner(h**2 * (uh - grad(div(uh)) - f)**2, w) * dx + inner(h**2 * (grad(uh - grad(div(uh)) - f)**2), w) * dx)
+        eta_vol = assemble(inner(h**2 * (uh - grad(div(uh)) - f)**2, w) * dx + inner(h**2 * (div(uh - grad(div(uh)) - f)**2), w) * dx)
         eta_jump = assemble(inner(h('+') * jump(div(uh))**2, w('+')) * dS
             + inner(h('-') * jump(div(uh))**2, w('-')) * dS)
         eta_boundary = assemble(inner(h * dot(grad(u_real - uh), n)**2, w) * ds)
@@ -118,35 +118,41 @@ def run_div(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "direct
 
     #     return u_real
     
-    def generate_u_real(mesh, p):
-        u_real = Function(FunctionSpace(mesh, "CG", p), name="u_real")
+    # def generate_u_real(mesh, p, alpha):
+    #     x, y = SpatialCoordinate(mesh)
+
+    #     r = sqrt(x**2 + y**2)
+    #     phi = atan2(y, x)
+    #     phi = conditional(lt(phi, 0), phi + 2 * pi, phi) # map to [0 , 2pi]
+
+    #     alpha = Constant(0.1)
+    #     beta = Constant(-14.92256510455152)
+    #     delta = Constant(pi / 4)
+
+    #     mu = conditional(
+    #         lt(phi, pi/2),
+    #         cos((pi/2 - beta) * alpha) * cos((phi - pi/2 + delta) * alpha),
+    #         conditional(
+    #             lt(phi, pi),
+    #             cos(delta * alpha) * cos((phi - pi + beta) * alpha),
+    #             conditional(
+    #                 lt(phi, 3*pi/2),
+    #                 cos(beta * alpha) * cos((phi - pi - delta) * alpha),
+    #                 cos((pi/2 - delta) * alpha) * cos((phi - 3*pi/2 - beta) * alpha)
+    #             )
+    #         )
+    #     )
+
+    #     u_expr = r**alpha * mu
+    #     u_real = as_vector([u_expr, u_expr])
+    #     return u_real
+
+    def generate_u_real(mesh, p, alpha):
         x, y = SpatialCoordinate(mesh)
-
         r = sqrt(x**2 + y**2)
-        phi = atan2(y, x)
-        phi = conditional(lt(phi, 0), phi + 2 * pi, phi) # map to [0 , 2pi]
+        chi = conditional(lt(r, 0.1), exp(- (0.1**2) / (0.1**2 - r**2)), 0)
 
-        alpha = Constant(0.1)
-        beta = Constant(-14.92256510455152)
-        delta = Constant(pi / 4)
-
-        mu = conditional(
-            lt(phi, pi/2),
-            cos((pi/2 - beta) * alpha) * cos((phi - pi/2 + delta) * alpha),
-            conditional(
-                lt(phi, pi),
-                cos(delta * alpha) * cos((phi - pi + beta) * alpha),
-                conditional(
-                    lt(phi, 3*pi/2),
-                    cos(beta * alpha) * cos((phi - pi - delta) * alpha),
-                    cos((pi/2 - delta) * alpha) * cos((phi - 3*pi/2 - beta) * alpha)
-                )
-            )
-        )
-
-        u_expr = r**alpha * mu
-        u_real = as_vector([u_expr, u_expr])
-        return u_real
+        return as_vector([chi * r**(alpha) * x, chi * r**(alpha) * y])
 
 
 
@@ -159,8 +165,6 @@ def run_div(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "direct
     geo = OCCGeometry(L, dim=2)
     ngmsh = geo.GenerateMesh(maxh=0.1)
     mesh = Mesh(ngmsh)
-
-    from netgen.geom2d import unit_square
 
     from netgen.meshing import Mesh as NetgenMesh
     from netgen.meshing import MeshPoint, Element2D, FaceDescriptor, Element1D 
@@ -292,7 +296,7 @@ def run_div(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "direct
 
         k = 0
         error_est = 0
-        u_real = generate_u_real(mesh, p)
+        u_real = generate_u_real(mesh, p, alpha)
 
         while norm(uh - u_prev) > lam_alg * error_est or k == 0:
             k += 1
