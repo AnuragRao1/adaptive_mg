@@ -72,7 +72,7 @@ def plot_single_est_convergence(dir_name, p, system, solver, dof, est):
         plt.ylabel(r"Estimated energy norm $\sqrt{\sum_K \eta_K^2}$")
         plt.title(f"Estimated Error Convergence ({system}, {solver}) for p={p}")
         plt.legend()
-        plt.savefig(f"{dir_name}/{p}/single_convergence.png")
+        plt.savefig(f"{dir_name}/{p}_single_convergence.png")
     
 def plot_joint_est_convergence(dir_name, system, solver, dofs, errors_est):
     colors = ['blue', 'green', 'red', 'purple']
@@ -81,8 +81,8 @@ def plot_joint_est_convergence(dir_name, system, solver, dofs, errors_est):
     plt.grid(True)
     for p in range(4):
         plt.loglog(dofs[p+1], errors_est[p+1], '-o', color=colors[p], alpha = 0.5, markersize=2.5, label=f"p={p+1}")
-        scaling = errors_est[p+1][20] / dofs[p+1][20]**scaling_exp[p+1]
-        plt.loglog(dofs[p+1][20:],scaling * dofs[p+1][20:]**scaling_exp[p+1], '--', alpha=0.5, color= colors[p], label=f"x^{scaling_exp[p+1]}")
+        # scaling = errors_est[p+1][20] / dofs[p+1][20]**scaling_exp[p+1]
+        # plt.loglog(dofs[p+1][20:],scaling * dofs[p+1][20:]**scaling_exp[p+1], '--', alpha=0.5, color= colors[p], label=f"x^{scaling_exp[p+1]}")
 
 
     plt.xlabel("Number of degrees of freedom")
@@ -124,7 +124,7 @@ def plot_single_time_convergence(dir_name, system, solver, p, times, errors_est)
     plt.ylabel(r"Estimated energy norm $\sqrt{\sum_K \eta_K^2}$")
     plt.title(f"Estimator vs Cumulative Runtime ({system}, {solver}) for p={p}")
     plt.legend()
-    plt.savefig(f"{dir_name}/{p}/runtime_convergence.png")
+    plt.savefig(f"{dir_name}/{p}_runtime_convergence.png")
 
 def plot_joint_time_convergence(dir_name, system, solver, times, errors_est):
 

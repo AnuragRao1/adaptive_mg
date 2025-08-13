@@ -62,9 +62,6 @@ def run_maxwell(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "di
         t = as_vector([-n[1], n[0]])
         v = CellVolume(mesh)
 
-        # no boundary term since E \times n = 0 
-        # grad X (E X n) = E div(n) - n div(E) + n dot grad(E) - E dot grad(n) 
-        # curl_E_cross_n = uh * div(n) - n * div(uh) + dot(n, grad(uh)) - dot(uh, grad(n))
         cross = lambda a,b: a[0] * b[1] - a[1] * b[0]
         curl_E_cross_n = curl(cross(uh,n))
         G = (
@@ -120,35 +117,46 @@ def run_maxwell(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "di
     #     u_real = as_vector([-r**alpha * sin(alpha * theta), r**alpha * cos(alpha * theta)])
     #     return u_real
     
+    # def generate_u_real(mesh, p, alpha):
+    #     u_real = Function(FunctionSpace(mesh, "CG", p), name="u_real")
+    #     x, y = SpatialCoordinate(mesh)
+
+    #     r = sqrt(x**2 + y**2)
+    #     phi = atan2(y, x)
+    #     phi = conditional(lt(phi, 0), phi + 2 * pi, phi) # map to [0 , 2pi]
+
+    #     alpha = Constant(0.1)
+    #     beta = Constant(-14.92256510455152)
+    #     delta = Constant(pi / 4)
+
+    #     mu = conditional(
+    #         lt(phi, pi/2),
+    #         cos((pi/2 - beta) * alpha) * cos((phi - pi/2 + delta) * alpha),
+    #         conditional(
+    #             lt(phi, pi),
+    #             cos(delta * alpha) * cos((phi - pi + beta) * alpha),
+    #             conditional(
+    #                 lt(phi, 3*pi/2),
+    #                 cos(beta * alpha) * cos((phi - pi - delta) * alpha),
+    #                 cos((pi/2 - delta) * alpha) * cos((phi - 3*pi/2 - beta) * alpha)
+    #             )
+    #         )
+    #     )
+
+    #     u_expr = r**alpha * mu
+    #     u_real = as_vector([u_expr, u_expr])
+    #     return u_real
     def generate_u_real(mesh, p, alpha):
-        u_real = Function(FunctionSpace(mesh, "CG", p), name="u_real")
+        V = FunctionSpace(mesh, "N1curl", p)
         x, y = SpatialCoordinate(mesh)
-
         r = sqrt(x**2 + y**2)
-        phi = atan2(y, x)
-        phi = conditional(lt(phi, 0), phi + 2 * pi, phi) # map to [0 , 2pi]
+        chi = conditional(lt(r, 0.1), exp(- (0.1**2) / (0.1**2 - r**2)), 0)
+        theta = atan2(y, x)
+        theta = conditional(lt(theta, 0), theta + 2 * pi, theta) # map to [0 , 2pi]
 
-        alpha = Constant(0.1)
-        beta = Constant(-14.92256510455152)
-        delta = Constant(pi / 4)
-
-        mu = conditional(
-            lt(phi, pi/2),
-            cos((pi/2 - beta) * alpha) * cos((phi - pi/2 + delta) * alpha),
-            conditional(
-                lt(phi, pi),
-                cos(delta * alpha) * cos((phi - pi + beta) * alpha),
-                conditional(
-                    lt(phi, 3*pi/2),
-                    cos(beta * alpha) * cos((phi - pi - delta) * alpha),
-                    cos((pi/2 - delta) * alpha) * cos((phi - 3*pi/2 - beta) * alpha)
-                )
-            )
-        )
-
-        u_expr = r**alpha * mu
-        u_real = as_vector([u_expr, u_expr])
-        return u_real
+        # return as_vector([chi * r**(alpha) * x, chi * r**(alpha) * y])
+        # return as_vector([-r**(-1/2) * y, r**(-1/2)*x])
+        return Function(V).interpolate(as_vector([0, r**alpha * sin(alpha * theta)]))
 
 
 
@@ -162,31 +170,31 @@ def run_maxwell(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "di
     mesh = Mesh(ngmsh)
 
 
-    from netgen.meshing import Mesh as NetgenMesh
-    from netgen.meshing import MeshPoint, Element2D, FaceDescriptor, Element1D 
-    from netgen.csg import Pnt 
+    # from netgen.meshing import Mesh as NetgenMesh
+    # from netgen.meshing import MeshPoint, Element2D, FaceDescriptor, Element1D 
+    # from netgen.csg import Pnt 
     
-    ngmesh = NetgenMesh(dim=2) 
+    # ngmesh = NetgenMesh(dim=2) 
     
-    fd = ngmesh.Add(FaceDescriptor(bc=1,domin=1,surfnr=1)) 
+    # fd = ngmesh.Add(FaceDescriptor(bc=1,domin=1,surfnr=1)) 
     
-    pnums = [] 
-    pnums.append(ngmesh.Add(MeshPoint(Pnt(-1, -1, 0)))) 
-    pnums.append(ngmesh.Add(MeshPoint(Pnt(-1, 1, 0))))  
-    pnums.append(ngmesh.Add(MeshPoint(Pnt( 1, 1, 0))))  
-    pnums.append(ngmesh.Add(MeshPoint(Pnt( 1, -1, 0)))) 
-    pnums.append(ngmesh.Add(MeshPoint(Pnt( 0, 0, 0))))  
+    # pnums = [] 
+    # pnums.append(ngmesh.Add(MeshPoint(Pnt(-1, -1, 0)))) 
+    # pnums.append(ngmesh.Add(MeshPoint(Pnt(-1, 1, 0))))  
+    # pnums.append(ngmesh.Add(MeshPoint(Pnt( 1, 1, 0))))  
+    # pnums.append(ngmesh.Add(MeshPoint(Pnt( 1, -1, 0)))) 
+    # pnums.append(ngmesh.Add(MeshPoint(Pnt( 0, 0, 0))))  
     
-    ngmesh.Add(Element2D(fd, [pnums[0], pnums[1], pnums[4]]))  
-    ngmesh.Add(Element2D(fd, [pnums[1], pnums[2], pnums[4]]))  
-    ngmesh.Add(Element2D(fd, [pnums[2], pnums[3], pnums[4]]))  
-    ngmesh.Add(Element2D(fd, [pnums[3], pnums[0], pnums[4]])) 
+    # ngmesh.Add(Element2D(fd, [pnums[0], pnums[1], pnums[4]]))  
+    # ngmesh.Add(Element2D(fd, [pnums[1], pnums[2], pnums[4]]))  
+    # ngmesh.Add(Element2D(fd, [pnums[2], pnums[3], pnums[4]]))  
+    # ngmesh.Add(Element2D(fd, [pnums[3], pnums[0], pnums[4]])) 
     
-    ngmesh.Add(Element1D([pnums[0], pnums[1]], index=1)) 
-    ngmesh.Add(Element1D([pnums[1], pnums[2]], index=1)) 
-    ngmesh.Add(Element1D([pnums[2], pnums[3]], index=1)) 
-    ngmesh.Add(Element1D([pnums[0], pnums[3]], index=1))
-    mesh = Mesh(ngmesh)
+    # ngmesh.Add(Element1D([pnums[0], pnums[1]], index=1)) 
+    # ngmesh.Add(Element1D([pnums[1], pnums[2]], index=1)) 
+    # ngmesh.Add(Element1D([pnums[2], pnums[3]], index=1)) 
+    # ngmesh.Add(Element1D([pnums[0], pnums[3]], index=1))
+    # mesh = Mesh(ngmesh)
 
 
     amh = AdaptiveMeshHierarchy([mesh])
@@ -212,10 +220,11 @@ def run_maxwell(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "di
 
         return {
             "mat_type": mat_type,
-            "ksp_type": "cg",
+            "ksp_type": "gmres",
             "pc_type": "mg",
             "mg_levels": {
-                "ksp_type": "chebyshev",
+                "ksp_type": "richardson",
+                "ksp_richardson_scale": 1/4,
                 "ksp_max_it": 1,
                 **relax
             },
@@ -317,10 +326,9 @@ def run_maxwell(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "di
 
 
         u_k = Function(V).interpolate(uh)
-        if level % 10 == 0 or level < 15:
-                ur = Function(V, name="exact").interpolate(u_real)
-                eh = Function(V, name="error").interpolate(ur - uh)            
-                VTKFile(f"output/maxwell_L_{solver}/theta={theta}_lam={lam_alg}_alpha={alpha}_dim={dim}/{p}/{level}_{k}.pvd").write(uh, ur, eh)
+        ur = Function(V, name="exact").interpolate(u_real)
+        eh = Function(V, name="error").interpolate(ur - uh)            
+        VTKFile(f"output/maxwell_L_{solver}/theta={theta}_lam={lam_alg}_alpha={alpha}_dim={dim}/{p}/{level}_{k}.pvd").write(uh, ur, eh)
         k_l.append(k)
 
         if not uniform:

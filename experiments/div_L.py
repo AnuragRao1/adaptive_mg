@@ -150,10 +150,23 @@ def run_div(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "direct
     def generate_u_real(mesh, p, alpha):
         x, y = SpatialCoordinate(mesh)
         r = sqrt(x**2 + y**2)
+        theta = atan2(y, x)
+        theta = conditional(lt(theta, 0), theta + 2 * pi, theta) # map to [0 , 2pi]
+
         chi = conditional(lt(r, 0.1), exp(- (0.1**2) / (0.1**2 - r**2)), 0)
 
-        return as_vector([chi * r**(alpha) * x, chi * r**(alpha) * y])
+        return as_vector([chi * r**alpha * x, chi * r**alpha * x])
+        # return as_vector([sin(pi * x) * exp(-(y-0.5)**2/0.03**2), cos(pi * x) * exp(-(y-0.5)**2/0.03**2)])
+        # rho = 0.05
+        # sx = (abs(x) - 0.8) / 0.15
+        # t = (abs(y) - rho/2) / (rho/2) * 2 - 1  # map (rho/2 , rho) -> (-1,1)
+        # bump = conditional(lt(abs(t), 1.0),
+        #                 exp(-1.0 / (1.0 - t**2 + 1e-14)),
+        #                 0.0)
 
+        # chi = conditional(le(abs(x), 0.8),  1, conditional(le(abs(x), 0.95), 1 - (6 * sx**5 - 15 * sx**4 + 10 * sx**3), 0))
+        # eta = conditional(le(abs(y), rho/2), 1, bump)
+        # return as_vector([0, chi * eta * ln(abs(y))])
 
 
 
@@ -216,10 +229,12 @@ def run_div(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "direct
 
         return {
             "mat_type": mat_type,
-            "ksp_type": "cg",
+            "ksp_type": "gmres",
             "pc_type": "mg",
             "mg_levels": {
-                "ksp_type": "chebyshev",
+                "ksp_type": "richardson",
+                "ksp_richardson_scale": 1/16,
+                "ksp_monitor_true_residual": None,
                 "ksp_max_it": 1,
                 **relax
             },
@@ -306,10 +321,10 @@ def run_div(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "direct
             (uh, f) = solve_div(mesh, p, uh, u_real, param_set, uniform)
             times.append(time.time() - start)
             
-            if level % 10 == 0 or level < 15:
-                ur = Function(V, name="exact").interpolate(u_real)
-                eh = Function(V, name="error").interpolate(ur - uh)
-                VTKFile(f"output/div_L_{solver}/theta={theta}_lam={lam_alg}_alpha={alpha}_dim={dim}/{p}/{level}_{k}.pvd").write(uh, ur, eh)
+            
+            ur = Function(V, name="exact").interpolate(u_real)
+            eh = Function(V, name="error").interpolate(ur - uh)
+            VTKFile(f"output/div_L_{solver}/theta={theta}_lam={lam_alg}_alpha={alpha}_dim={dim}/{p}/{level}_{k}.pvd").write(uh, ur, eh)
 
             (eta, error_est) = estimate_error(mesh, uh, u_real, f) 
             print("ERROR ESTIMATE: ", error_est)

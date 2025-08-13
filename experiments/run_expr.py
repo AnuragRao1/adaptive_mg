@@ -2,6 +2,7 @@ from maxwell_L import run_maxwell
 from div_L import run_div
 from kellogg import run_kellogg
 from grad import run_grad
+import sys
 systems = {"curl": run_maxwell, "div": run_div, "kellogg": run_kellogg, "grad": run_grad}
 
 import argparse
@@ -33,8 +34,8 @@ def main():
     parser.add_argument("--dim", type=float, default=1e4, help="Dimension of finest function space")
     parser.add_argument("--solver", type=str, default="direct", choices=["direct", "mg"],
                         help="Solver type (for now the only choices are direct or multigrid through patch relaxation).")
-    args = parser.parse_args()
-
+    args, unknown = parser.parse_known_args()
+    sys.argv = [sys.argv[0]] + unknown
     print(f"SYSTEM: {args.system} with SOLVER: {args.solver}, P: {args.p}, THETA: {args.theta}, LAM_ALG: {args.lam_alg}, ALPHA: {args.alpha}, DIM: {args.dim}")
     run_system(args.system, args.p, args.theta, args.lam_alg, args.alpha, args.dim, args.solver)
 

@@ -14,6 +14,10 @@ from firedrake import dmhooks
 from firedrake.solving_utils import _SNESContext
 import time
 
+import numpy as np
+from matplotlib import pyplot as plt
+import csv
+
 def solve_poisson(p,mesh, params):
     V = FunctionSpace(mesh, "CG", p)
     uh = Function(V, name="Solution")
@@ -63,7 +67,7 @@ def estimate_error(mesh, uh):
     return (eta, error_est)
 
 
-def adapt(mesh, eta):
+def adapt(mesh, eta, theta):
     W = FunctionSpace(mesh, "DG", 0)
     markers = Function(W)
 
@@ -75,7 +79,6 @@ def adapt(mesh, eta):
     with eta.dat.vec_ro as eta_:
         eta_max = eta_.max()[1]
 
-    theta = 0.5
     should_refine = conditional(gt(eta, theta*eta_max), 1, 0)
     markers.interpolate(should_refine)
 
@@ -138,77 +141,104 @@ patch_relax = mg_params({
 mat_type="aij")
 
 max_iterations = 20
-dim = 1e5
-# for p in range(4,5):
-#     dofs = []
-#     error_estimators = []
-#     amh = AdaptiveMeshHierarchy([mesh2])
-#     level = 0
+theta = 0.5
+dim = 1e6
+for p in range(1,5):
+    dofs = []
+    error_estimators = []
+    amh = AdaptiveMeshHierarchy([mesh2])
+    level = 0
 
-#     while level == 0 or uh.function_space().dim() < dim:
-#         start = time.time()
-#         print(f"level {level}")
-#         mesh = amh[level]
+    csv_file = f"output/poisson_L/theta={theta}_dim={dim}/{p}/dat.csv"
+    os.makedirs(os.path.dirname(csv_file), exist_ok=True)
 
-#         uh = solve_poisson(p, mesh, patch_relax)
-#         VTKFile(f"output/poisson_l/{dim}_{p}/adaptive_loop_{level}.pvd").write(uh)
+    with open(csv_file, mode='w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(["dof", "error_est", "time"])
 
-#         (eta, error_est) = estimate_error(mesh, uh)
-#         VTKFile(f"output/poisson_l/{dim}_{p}/eta_{level}.pvd").write(eta)
+    while level == 0 or uh.function_space().dim() < dim:
+        print(f"level {level}")
+        mesh = amh[level]
 
-#         print(f"  ||u - u_h|| <= C x {error_est}")
-#         error_estimators.append(error_est)
-#         dofs.append(uh.function_space().dim())
+        start = time.time()
+        uh = solve_poisson(p, mesh, patch_relax)
+        run_time = time.time() - start
+        VTKFile(f"output/poisson_L/theta={theta}_dim={dim}/{p}/adaptive_loop_{level}.pvd").write(uh)
 
-#         mesh = adapt(mesh, eta)
-#         if uh.function_space().dim() < dim:
-#             amh.add_mesh(mesh)
-#         print(f"DoFs: {dofs[-1]}, TIME: {time.time() - start}")
-#         level += 1
+        (eta, error_est) = estimate_error(mesh, uh)
+        VTKFile(f"output/poisson_L/theta={theta}_dim={dim}/{p}/eta_{level}.pvd").write(eta)
+
+        print(f"  ||u - u_h|| <= C x {error_est}")
+        error_estimators.append(error_est)
+        dofs.append(uh.function_space().dim())
+
+        with open(csv_file, mode='a', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow([dofs[-1], error_est, run_time])
+
+        if uh.function_space().dim() < dim:
+            mesh = adapt(mesh, eta, theta)
+            amh.add_mesh(mesh)
+        print(f"DoFs: {dofs[-1]}, TIME: {time.time() - start}")
+        level += 1
+
+
+def single_time_convergence(dof, est, theta, p):
+    plt.figure(figsize=(8, 6))
+    plt.grid(True)
+    plt.loglog(dof[2:], est[2:], '-o', alpha = 0.7, markersize = 4)
+    scaling = est[2] / dof[2]**-0.5
+    plt.loglog(dof[2:], scaling * dof[2:]**-0.5, '--', alpha=0.5, color="lightcoral", label="x^{-0.5}")
+    scaling = est[2] / dof[2]**-0.1
+    plt.loglog(dof[2:], scaling * dof[2:]**-0.1, '--', alpha = 0.5, color='lawngreen', label = "x^{-0.1}")
+    scaling = est[2] / dof[2]**-1
+    plt.loglog(dof[2:], scaling * dof[2:]**-1, '--', alpha = 0.5, color = 'aqua', label = "x^{-1}")
+    scaling = est[2] / dof[2]**-2
+    plt.loglog(dof[2:], scaling * dof[2:]**-2, '--', alpha = 0.5, color = 'indigo', label = "x^{-2}")
+    plt.xlabel("Number of degrees of freedom")
+    plt.ylabel(r"Estimated energy norm $\sqrt{\sum_K \eta_K^2}$")
+    plt.title(f"Estimated Error Convergence ({theta}) for p={p}")
+    plt.legend()
+    plt.savefig(f"output/poisson_L/theta={theta}_dim={dim}/{theta}_{p}_convergence.png")
     
-#     np.save(f"output/poisson_l/{dim}_{p}/dofs.npy", np.array(dofs))
-#     np.save(f"output/poisson_l/{dim}_{p}/error_est.npy", np.array(error_estimators))
-
-
 
 import matplotlib.pyplot as plt
 import numpy as np
-# for p in range(1, 5):
-#     if p == 1:
-#         dofs = np.load(f"output/poisson_l/{max_iterations}_{p}/dofs.npy", allow_pickle=True)
-#         error_estimators = np.load(f"output/poisson_l/{max_iterations}_{p}/error_est.npy", allow_pickle=True)
-#     else:
-#         dofs = np.load(f"output/poisson_l/{dim}_{p}/dofs.npy", allow_pickle=True)
-#         error_estimators = np.load(f"output/poisson_l/{dim}_{p}/error_est.npy", allow_pickle=True)
+for p in range(1, 5):
+    for theta in [0, 0.5]:
+        with open(f"output/poisson_L/theta={theta}_dim={dim}/{p}/dat.csv", "r", newline="") as f:
+            reader = csv.reader(f)
+            rows = list(reader)
+        columns = list(zip(*rows))
+        dofs = np.array(columns[0][1:], dtype=float)
+        errors_est = np.array(columns[1][1:], dtype=float)
+        times = np.array(columns[2][1:], dtype=float)
 
-#     plt.grid()
-#     plt.loglog(dofs, error_estimators, '-ok', label="Measured convergence")
-#     scaling = 1.5 * error_estimators[0]/dofs[0]**-(1/(2**p))
-#     plt.loglog(dofs, np.array(dofs)**(-0.5) * scaling, '--', label="Optimal convergence")
-#     plt.xlabel("Number of degrees of freedom")
-#     plt.ylabel(r"Error estimate of energy norm $\sqrt{\sum_K \eta_K^2}$")
-#     plt.title(f"Convergence for p={p}")
-#     plt.legend()
-#     plt.savefig(f"output/poisson_l/{dim}_{p}/adaptive_convergence.png")
-#     plt.close()
+        single_time_convergence(dofs, errors_est, theta, p)
 
-plt.grid()
-colors = ['blue', 'green', 'red', 'purple']  
+
+plt.figure(figsize=(8,6))
+plt.grid(True)
+colors = ['blue', 'green', 'red', 'purple'] 
 for p in range(1,5):
-    if p == 1:
-        dofs = np.load(f"output/poisson_l/{max_iterations}_{p}/dofs.npy", allow_pickle=True)[:-4]
-        error_estimators = np.load(f"output/poisson_l/{max_iterations}_{p}/error_est.npy", allow_pickle=True)[:-4]
-    else:
-        dofs = np.load(f"output/poisson_l/{dim}_{p}/dofs.npy", allow_pickle=True)
-        error_estimators = np.load(f"output/poisson_l/{dim}_{p}/error_est.npy", allow_pickle=True)
+    for theta in [0, 0.5]:    
+        with open(f"output/poisson_L/theta={theta}_dim={dim}/{p}/dat.csv", "r", newline="") as f:
+            reader = csv.reader(f)
+            rows = list(reader)
+        columns = list(zip(*rows))
+        dofs = np.array(columns[0][1:], dtype=float)
+        errors_est = np.array(columns[1][1:], dtype=float)
+        times = np.array(columns[2][1:], dtype=float)
 
-    plt.loglog(dofs, error_estimators, '-o', markersize = 3, color = colors[p-1], label=f"p={p}")
-
+        if theta == 0.5:
+            plt.loglog(dofs, errors_est, '-o', markersize = 3, alpha=0.5, color = colors[p-1], label=f"adaptive: {p}")
+        else:
+            plt.loglog(dofs, errors_est, "--v", markersize = 3, alpha = 0.5, color = colors[p-1], label=f"uniform: {p}")
 plt.xlabel("Number of DoFs")
 plt.ylabel(r"Error estimate of energy norm $\sqrt{\sum_K \eta_K^2}$")
 plt.title("Convergence of Error Estimator")
 plt.legend()
-plt.savefig(f"output/poisson_l/{dim}_4/joint_adaptive_convergence.png")
+plt.savefig(f"output/poisson_L/theta={theta}_dim={dim}/joint_adaptive_convergence.png")
 plt.show()
 
 
