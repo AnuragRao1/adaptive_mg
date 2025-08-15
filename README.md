@@ -4,12 +4,12 @@ The central command for running each: \
 `python run_expr.py --system curl --p None --theta 0.5 --lam_alg 0.01 --alpha 2/3 --dim 1e4 --solver direct`
 
 The parameters are as follows:
-- system: Which system wants to be run. The options are
+- system: which system wants to be run. The options are
   - curl
   - div
   - grad
   - kellogg
-- p: Polynomial Degree. Specify which polynomial basis to run experiments for. p=None will run all p=1-4
+- p: polynomial degree. Specify which polynomial basis to run experiments for. p=None will run all p=1-4
 - theta: Dorfler marking parameter, theta in [0,1]
 - lam_alg: iterative solver parameter that controls convergence, lam_alg > 0.
 - alpha: exponent to radial component for curl/div problems. alpha in (0,1)
@@ -19,6 +19,8 @@ The parameters are as follows:
   -mg: multigrid (implemented with patch relaxation)
 
 To generate the plots for each system, run \
-`python plot_expr.py --system curl --p None --theta 0.5 --lam_alg 0.01 --alpha 2/3 --dim 1e4 --solver direct --dir_name None`
+`python plot_expr.py --system curl --p None --theta 0.5 --lam_alg 0.01 --alpha 2/3 --dim 1e4 --solver direct --dir_name None --w_uniform False`
 
-The parameters are the same as above, with the only new one being `dir_name`, which allows the user to specify the directory if the generated results were renamed/moved into a different location.
+The parameters are the same as above, with the only new ones being
+- dir_name: allows the user to specify the directory of data if the generated results were renamed/moved into a different location. To be input as "path/to/data"
+- w_uniform: Boolean value. Controls whether convergence plots for adaptively refined (theta != 0) are to be plotted against uniform (theta = 0)
