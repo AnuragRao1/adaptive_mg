@@ -64,13 +64,14 @@ def run_div(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "direct
         G = (
             inner(eta_sq / v, w) * dx 
             - inner(h**2 * (uh - grad(div(uh)) - f)**2, w) * dx
-            - inner(h**2 * (div(uh - grad(div(uh)) - f)**2), w) * dx # added from H(div) norm
+            # - inner(h**2 * (div(uh - grad(div(uh)) - f)**2), w) * dx # added from H(div) norm
             - inner(h('+') * jump(div(uh))**2, w('+')) * dS
             - inner(h('-') * jump(div(uh))**2, w('-')) * dS
             - inner(h * dot(u_real - uh, n)**2, w) * ds
             )
         
-        eta_vol = assemble(inner(h**2 * (uh - grad(div(uh)) - f)**2, w) * dx + inner(h**2 * (div(uh - grad(div(uh)) - f)**2), w) * dx)
+        # eta_vol = assemble(inner(h**2 * (uh - grad(div(uh)) - f)**2, w) * dx + inner(h**2 * (div(uh - grad(div(uh)) - f)**2), w) * dx)
+        eta_vol = assemble(inner(h**2 * (uh - grad(div(uh)) - f)**2, w) * dx)
         eta_jump = assemble(inner(h('+') * jump(div(uh))**2, w('+')) * dS
             + inner(h('-') * jump(div(uh))**2, w('-')) * dS)
         eta_boundary = assemble(inner(h * dot(grad(u_real - uh), n)**2, w) * ds)
@@ -155,7 +156,9 @@ def run_div(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "direct
 
         chi = conditional(lt(r, 0.1), exp(- (0.1**2) / (0.1**2 - r**2)), 0)
 
-        return as_vector([chi * r**alpha * x, chi * r**alpha * x])
+        return as_vector([chi * r**alpha * x, chi * r**alpha * y])
+    
+        # return as_vector([sin(2 * pi * x) * sin(pi * y), cos(pi * x) * sin(2 * pi * y)])
         # return as_vector([sin(pi * x) * exp(-(y-0.5)**2/0.03**2), cos(pi * x) * exp(-(y-0.5)**2/0.03**2)])
         # rho = 0.05
         # sx = (abs(x) - 0.8) / 0.15
@@ -203,6 +206,10 @@ def run_div(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "direct
     ngmesh.Add(Element1D([pnums[1], pnums[2]], index=1)) 
     ngmesh.Add(Element1D([pnums[2], pnums[3]], index=1)) 
     ngmesh.Add(Element1D([pnums[0], pnums[3]], index=1))
+    for i in range(2):
+        for l, el in enumerate(ngmesh.Elements2D()):
+            el.refine = 1
+        ngmesh.Refine(adaptive=True)
     mesh = Mesh(ngmesh)
 
 
@@ -229,13 +236,14 @@ def run_div(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "direct
 
         return {
             "mat_type": mat_type,
-            "ksp_type": "gmres",
+            "ksp_type": "fgmres",
             "pc_type": "mg",
             "mg_levels": {
                 "ksp_type": "richardson",
-                "ksp_richardson_scale": 1/16,
+                "ksp_richardson_scale": 1/4,
                 "ksp_monitor_true_residual": None,
-                "ksp_max_it": 1,
+                "mg_levels_ksp_monitor_true_residual": None,
+                "ksp_max_it": 3,
                 **relax
             },
             "mg_coarse": coarse
@@ -344,8 +352,8 @@ def run_div(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "direct
         k_l.append(k)
 
         if not uniform:
-            mesh = adapt(mesh, eta)
             if u_k.function_space().dim() <= dim:
+                mesh = adapt(mesh, eta)
                 amh.add_mesh(mesh)
                 
         

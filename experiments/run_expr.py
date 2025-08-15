@@ -7,7 +7,7 @@ systems = {"curl": run_maxwell, "div": run_div, "kellogg": run_kellogg, "grad": 
 
 import argparse
 
-def run_system(system="curl", p=None, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e4, solver="direct"):
+def run_system(system="curl", p=None, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e5, solver="direct"):
     if not p:
         for p in range(1,5):
             if system == "curl" or system == "div":

@@ -7,13 +7,15 @@ import argparse
 systems = {"curl": "maxwell_L", "div": "div_L", "kellogg": "kellogg", "grad": "grad"}
 
 
-def plot_system(system="curl", p=None, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e4, solver="direct", dir_name = None):
+def plot_system(system="curl", p=None, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e4, solver="direct", dir_name = None, w_uniform=False):
     sys_name = systems[system]
     if not dir_name:
         if system == "curl" or system == "div":
             dir_name = f"output/{sys_name}_{solver}/theta={theta}_lam={lam_alg}_alpha={alpha}_dim={dim}"
+            unif_dir = f"output/{sys_name}_{solver}/theta=0.0_lam={lam_alg}_alpha={alpha}_dim={dim}"
         else:
             dir_name = f"output/{sys_name}_{solver}/theta={theta}_lam={lam_alg}_dim={dim}"
+            unif_dir = f"output/{sys_name}_{solver}/theta=0.0_lam={lam_alg}_dim={dim}"
 
     dofs = {}
     errors_est = {}
@@ -41,6 +43,25 @@ def plot_system(system="curl", p=None, theta=0.5, lam_alg=0.01, alpha = 2/3, dim
         plot_joint_est_convergence(dir_name, system, solver, dofs, errors_est)
         plot_joint_true_convergence(dir_name, system, solver, dofs, errors_true)
         plot_joint_time_convergence(dir_name, system, solver, times, errors_est)
+
+        if w_uniform:
+            udofs = {}
+            uerrors_est = {}
+            uerrors_true = {}
+            utimes = {}
+            for pp in range(1,5):
+                with open(f"{unif_dir}/{pp}/dat.csv", "r", newline="") as f:
+                    reader = csv.reader(f)
+                    rows = list(reader)
+
+                columns = list(zip(*rows))
+                udofs[pp] = np.array(columns[0][1:], dtype=float)
+                uerrors_est[pp] = np.array(columns[1][1:], dtype=float)
+                uerrors_true[pp] = np.array(columns[2][1:], dtype=float)
+                utimes[pp] = np.array(columns[4][1:], dtype=float)
+
+            
+            plot_joint_w_uniform(dir_name, system, solver, dofs, udofs, errors_est, uerrors_est)
     else:
         with open(f"{dir_name}/{p}/dat.csv", "r", newline="") as f:
                 reader = csv.reader(f)
@@ -53,7 +74,7 @@ def plot_system(system="curl", p=None, theta=0.5, lam_alg=0.01, alpha = 2/3, dim
 
         plot_single_est_convergence(dir_name, p, system, solver, dof, est)
         plot_single_time_convergence(dir_name, system, solver, p, tim, est)
-
+        
        
 
 def plot_single_est_convergence(dir_name, p, system, solver, dof, est):
@@ -141,6 +162,20 @@ def plot_joint_time_convergence(dir_name, system, solver, times, errors_est):
     plt.title(f"Estimator vs Cumulative Runtime ({system}, {solver})")
     plt.savefig(f"{dir_name}/joint_runtime_convergence.png")
 
+def plot_joint_w_uniform(dir_name, system, solver, dofs, udofs, errors_est, uerrors_est):
+    colors = ['blue', 'green', 'red', 'purple']
+    scaling_exp = {1: -0.5, 2: -1, 3: -2, 4: -2}
+    plt.figure(figsize=(8, 6))
+    plt.grid(True)
+    for p in range(4):
+        plt.loglog(dofs[p+1], errors_est[p+1], '-o', color=colors[p], alpha = 0.7, markersize=3, label=f"adaptive: {p+1}")
+        plt.loglog(udofs[p+1], uerrors_est[p+1], '--v', color=colors[p], alpha = 0.5, markersize=3, label=f"uniform: {p+1}")
+
+    plt.xlabel("Number of degrees of freedom")
+    plt.ylabel(r"Estimated energy norm $\sqrt{\sum_K \eta_K^2}$")
+    plt.legend()
+    plt.title(f"Estimated Error Convergence ({system}, {solver})")
+    plt.savefig(f"{dir_name}/joint_adaptive_w_uniform.png")
 
 def main():
     parser = argparse.ArgumentParser(description="Plot system results")
@@ -154,6 +189,8 @@ def main():
     parser.add_argument("--solver", type=str, default="direct", choices=["direct", "mg"],
                         help="Solver type (for now the only choices are direct or multigrid through patch relaxation).")
     parser.add_argument("--dir_name", type=str, default=None, help="Custom data directory (if not using default, rename, etc.)")
+    parser.add_argument("--w_uniform", type=bool, default=False, help="Plot convergence vs uniform?")
+
     args = parser.parse_args()
 
     print(f"SYSTEM: {args.system} with SOLVER: {args.solver}, P: {args.p}, THETA: {args.theta}, LAM_ALG: {args.lam_alg}, ALPHA: {args.alpha}, DIM: {args.dim}")
@@ -166,6 +203,7 @@ def main():
         dim=args.dim,
         solver=args.solver,
         dir_name=args.dir_name,
+        w_uniform=args.w_uniform
     )
 
 if __name__ == "__main__":

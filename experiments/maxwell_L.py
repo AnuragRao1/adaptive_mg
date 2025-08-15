@@ -332,8 +332,8 @@ def run_maxwell(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "di
         k_l.append(k)
 
         if not uniform:
-            mesh = adapt(mesh, eta)
             if u_k.function_space().dim() <= dim:
+                mesh = adapt(mesh, eta)
                 amh.add_mesh(mesh)
                 
         
