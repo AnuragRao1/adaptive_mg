@@ -116,14 +116,16 @@ class AdaptiveMeshHierarchy(HierarchyBase):
 
         return split_functions
     
-    def use_weight(self, u, child):
+    def use_weight(self, V, child):
         # counts of nodes across submeshes, to fix restriction before recombinatoin
-        w = Function(u.function_space()).assign(1)
+        w = Function(V).assign(1)
         splits = self.split_function(w, child)
 
         self.recombine(splits, w, child)
+        with w.dat.vec as wvec:
+            wvec.reciprocal()
         return w
-
+        
 
     def recombine(self, split_funcs, f, child=True):
         # Recombines functions on submeshes to full mesh      

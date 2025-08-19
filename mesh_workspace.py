@@ -190,11 +190,13 @@ v.rename("fine")
 # VTKFile("output/split_transfer/output_fine_atmtest.pvd").write(v)
 
 
-# # RESTRICT
-u.interpolate(xcoarse)
-atm = AdaptiveTransferManager()
-atm.prolong(u, v)
-VTKFile("output/assign_test/v.pvd").write(v)
+# # # RESTRICT
+# u.interpolate(xcoarse)
+# atm = AdaptiveTransferManager()
+# atm.prolong(u, v)
+# VTKFile("output/assign_test/v.pvd").write(v)
+
+
 
 
 # rf = Cofunction(Vfine.dual()).assign(1)

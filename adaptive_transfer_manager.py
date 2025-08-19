@@ -30,6 +30,7 @@ class AdaptiveTransferManager(TransferManager):
         super().__init__(native_transfers=native_transfers, use_averaging=use_averaging)
         self.tm = TransferManager()
         self.weight_cache = {}
+        self.work_function_cache = {}
 
     def generic_transfer(self, source, target, transfer_op):
 
@@ -54,21 +55,13 @@ class AdaptiveTransferManager(TransferManager):
                 target_mesh = amh.meshes[level + order]
                 curr_space = curr_source.function_space()
                 target_space = curr_space.reconstruct(mesh=target_mesh)
-                if isinstance(curr_source, Function):
-                    curr_target = Function(target_space)
-                if isinstance(curr_source, Cofunction):
-                    curr_target = Cofunction(target_space)
+                curr_target = self.get_work_function(target_space)
 
             if transfer_op == self.tm.restrict:
-                if (level, level + order) not in self.weight_cache:
-                    w = amh.use_weight(curr_source, child=True)
-                    self.weight_cache[(source_level, target_level)] = Function(curr_source.function_space()).assign(w)
-                else:
-                    w = self.weight_cache[(source_level, target_level)]
-
-                wsource = Function(curr_source.function_space())
+                w = self.get_weight(curr_source.function_space())
+                wsource = self.get_work_function(curr_source.function_space())
                 with curr_source.dat.vec as svec, w.dat.vec as wvec, wsource.dat.vec as wsvec:
-                    wsvec.pointwiseDivide(svec, wvec)
+                    wsvec.pointwiseMult(svec, wvec)
                 curr_source = wsource
 
             if order == 1:
@@ -83,6 +76,19 @@ class AdaptiveTransferManager(TransferManager):
             
             amh.recombine(target_function_splits, curr_target, child=order+1)
             curr_source = curr_target
+
+    def get_work_function(self, func_space):
+        try:
+            return self.work_function_cache[func_space]
+        except KeyError:
+            return self.work_function_cache.setdefault(func_space, Function(func_space))
+        
+    def get_weight(self, V_source):
+        try:
+            return self.weight_cache[V_source]
+        except KeyError:
+            amh, _ = get_level(V_source.mesh())
+            return self.weight_cache.setdefault(V_source, amh.use_weight(V_source, child=True))
 
     def prolong(self, uc, uf):
         self.generic_transfer(uc, uf, transfer_op=self.tm.prolong)
