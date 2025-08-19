@@ -64,16 +64,18 @@ def run_maxwell(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "di
 
         cross = lambda a,b: a[0] * b[1] - a[1] * b[0]
         curl_E_cross_n = curl(cross(uh,n))
+        curl_E_cross_n = curl(uh)
         G = (
             inner(eta_sq / v, w) * dx 
             - inner(h**2 * (curl(curl(uh)) + uh - f)**2, w) * dx
-            - inner(h**2 * curl(curl(curl(uh)) + uh - f)**2, w) * dx # added from H(curl) norm
+            # - inner(h**2 * curl(curl(curl(uh)) + uh - f)**2, w) * dx # added from H(curl) norm
             - inner(h('+') * jump(curl_E_cross_n, n)**2, w('+')) * dS
             - inner(h('-') * jump(curl_E_cross_n, n)**2, w('-')) * dS
             - inner(h * dot(u_real - uh, t)**2, w) * ds
             )
         
-        eta_vol = assemble(inner(h**2 * (curl(curl(uh)) + uh - f)**2, w) * dx + inner(h**2 * curl(curl(curl(uh)) + uh - f)**2, w) * dx)
+        # eta_vol = assemble(inner(h**2 * (curl(curl(uh)) + uh - f)**2, w) * dx + inner(h**2 * curl(curl(curl(uh)) + uh - f)**2, w) * dx)
+        eta_vol = assemble(inner(h**2 * (curl(curl(uh)) + uh - f)**2, w) * dx)
         eta_jump = assemble(inner(h('+') * jump(curl_E_cross_n, n)**2, w('+')) * dS
             + inner(h('-') * jump(curl_E_cross_n, n)**2, w('-')) * dS)
         eta_boundary = assemble(inner(h * dot(u_real - uh, t)**2, w) * ds)
@@ -89,7 +91,7 @@ def run_maxwell(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "di
         return (eta, error_est)
 
 
-    def adapt(mesh, eta):
+    def adapt(mesh, eta, theta):
         W = FunctionSpace(mesh, "DG", 0)
         markers = Function(W)
 
@@ -154,9 +156,18 @@ def run_maxwell(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "di
         theta = atan2(y, x)
         theta = conditional(lt(theta, 0), theta + 2 * pi, theta) # map to [0 , 2pi]
 
+        # return as_vector([sin(2 * pi * x) * sin(pi * y), cos(pi * x) * sin(2 * pi * y)])
+
+
+        # k = Constant(20)
+        # return grad(sin(k * x) * sin(k * y))
+
         # return as_vector([chi * r**(alpha) * x, chi * r**(alpha) * y])
         # return as_vector([-r**(-1/2) * y, r**(-1/2)*x])
-        return Function(V).interpolate(as_vector([0, r**alpha * sin(alpha * theta)]))
+        return as_vector([r**alpha * cos(alpha * theta), r**alpha * sin(alpha * theta)])
+        # g = exp(- ((x - 0.5)**2 + (y - 0.5)**2) / 0.2**2)
+        # return as_vector([g, 1/2 * g])
+
 
 
 
@@ -225,7 +236,7 @@ def run_maxwell(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "di
             "mg_levels": {
                 "ksp_type": "richardson",
                 "ksp_richardson_scale": 1/4,
-                "ksp_max_it": 1,
+                "ksp_max_it": 3,
                 **relax
             },
             "mg_coarse": coarse
@@ -333,7 +344,7 @@ def run_maxwell(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "di
 
         if not uniform:
             if u_k.function_space().dim() <= dim:
-                mesh = adapt(mesh, eta)
+                mesh = adapt(mesh, eta, theta)
                 amh.add_mesh(mesh)
                 
         

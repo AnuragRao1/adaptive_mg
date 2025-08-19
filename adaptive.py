@@ -110,9 +110,9 @@ class AdaptiveMeshHierarchy(HierarchyBase):
             V_split = V.reconstruct(mesh=hierarchy_dict[i].meshes[ind])
             assert V_split.mesh().submesh_parent == u_corr_space.function_space().mesh()
             if isinstance(u, Function):
-                split_functions[i] = Function(V_split, name=str(i)).interpolate(u_corr_space)
+                split_functions[i] = Function(V_split, name=str(i)).assign(u_corr_space)
             elif isinstance(u, Cofunction):
-                split_functions[i] = cofun_interpolate(u_corr_space, Cofunction(V_split, name=str(i)))
+                split_functions[i] = cofun_assign(u_corr_space, Cofunction(V_split, name=str(i)))
 
         return split_functions
     
@@ -141,15 +141,17 @@ class AdaptiveMeshHierarchy(HierarchyBase):
             if isinstance(f_label, Function):
                 if child:
                     split_label = int("10" + str(split_label))
-                    f_label.interpolate(val, subset=parent_mesh.cell_subset(split_label))
+                    # f_label.interpolate(val, subset=parent_mesh.cell_subset(split_label))
+                    f_label.assign(val, allow_missing_dofs=True)
                 else:
-                    f_label.interpolate(val, subset=parent_mesh.cell_subset(split_label))
+                    # f_label.interpolate(val, subset=parent_mesh.cell_subset(split_label))
+                    f_label.assign(val, allow_missing_dofs=True)
             if isinstance(f_label, Cofunction):
                 if child:
                     split_label = int("10" + str(split_label))
-                    f_label = cofun_interpolate(val, f_label, subset=parent_mesh.cell_subset(split_label))
+                    f_label = cofun_assign(val, f_label, subset=parent_mesh.cell_subset(split_label))
                 else: 
-                    f_label = cofun_interpolate(val, f_label, subset=parent_mesh.cell_subset(split_label))
+                    f_label = cofun_assign(val, f_label, subset=parent_mesh.cell_subset(split_label))
         return f
 
 
@@ -235,12 +237,13 @@ def full_to_sub(mesh, submesh, label):
 def cofun_as_function(c):
     return Function(c.function_space().dual(), val=c.dat)
 
-def cofun_interpolate(rsource, rtarget, subset=None):
+def cofun_assign(rsource, rtarget, subset=None):
     # Workaround to call interpolate on Cofunctions, only used for restrictions
     usource = cofun_as_function(rsource)
     utarget = cofun_as_function(rtarget)
     temp = Function(utarget.function_space())
     assert temp.function_space().mesh().submesh_parent == usource.function_space().mesh() or temp.function_space().mesh() == usource.function_space().mesh().submesh_parent
-    temp.interpolate(usource, subset=subset)
+    # temp.interpolate(usource, subset=subset)
+    temp.assign(usource, allow_missing_dofs=True)
     utarget.assign(utarget + temp)
     return rtarget

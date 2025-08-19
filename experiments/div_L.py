@@ -88,7 +88,7 @@ def run_div(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "direct
         return (eta, error_est)
 
 
-    def adapt(mesh, eta):
+    def adapt(mesh, eta, theta):
         W = FunctionSpace(mesh, "DG", 0)
         markers = Function(W)
 
@@ -353,7 +353,7 @@ def run_div(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "direct
 
         if not uniform:
             if u_k.function_space().dim() <= dim:
-                mesh = adapt(mesh, eta)
+                mesh = adapt(mesh, eta, theta)
                 amh.add_mesh(mesh)
                 
         

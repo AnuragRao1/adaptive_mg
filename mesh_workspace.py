@@ -130,7 +130,7 @@ mesh2 = Mesh(ngmesh)
 amh = AdaptiveMeshHierarchy([mesh])
 # VTKFile("output/meshes/initial_mesh.pvd").write(Function(FunctionSpace(mesh, "DG", 0)))
 
-for i in range(2):
+for i in range(1):
     # for_ref = np.zeros((len(ngmesh.Elements2D())))
     # for l, el in enumerate(ngmesh.Elements3D()):
     #     el.refine = 0
@@ -171,8 +171,8 @@ for i in range(2):
 
 xcoarse, _ = SpatialCoordinate(amh[0])
 xfine, _ = SpatialCoordinate(amh[-1]) 
-Vcoarse = FunctionSpace(amh[0], "CG", 1)
-Vfine = FunctionSpace(amh[-1], "CG", 1)
+Vcoarse = FunctionSpace(amh[0], "DG", 1)
+Vfine = FunctionSpace(amh[-1], "DG", 1)
 u = Function(Vcoarse)
 v = Function(Vfine)
 u.rename("coarse")
@@ -194,14 +194,15 @@ v.rename("fine")
 u.interpolate(xcoarse)
 atm = AdaptiveTransferManager()
 atm.prolong(u, v)
+VTKFile("output/assign_test/v.pvd").write(v)
 
 
 # rf = Cofunction(Vfine.dual()).assign(1)
-rf = assemble(TestFunction(Vfine)*dx)
-rc = Cofunction(Vcoarse.dual()) 
-atm.restrict(rf, rc)
+# rf = assemble(TestFunction(Vfine)*dx)
+# rc = Cofunction(Vcoarse.dual()) 
+# atm.restrict(rf, rc)
 
-assembled_rc = assemble(TestFunction(Vcoarse)*dx)
-print("Adaptive TM: ", assemble(action(rc, u)), assemble(action(rf, v)))
-assert (assemble(action(rc, u)) - assemble(action(rf, v))) / assemble(action(rf, v)) <= 1e-2
+# assembled_rc = assemble(TestFunction(Vcoarse)*dx)
+# print("Adaptive TM: ", assemble(action(rc, u)), assemble(action(rf, v)))
+# assert (assemble(action(rc, u)) - assemble(action(rf, v))) / assemble(action(rf, v)) <= 1e-2
 

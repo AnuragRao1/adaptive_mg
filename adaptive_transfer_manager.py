@@ -32,6 +32,8 @@ class AdaptiveTransferManager(TransferManager):
         self.weight_cache = {}
 
     def generic_transfer(self, source, target, transfer_op):
+
+
         # determine which meshes to iterate over
         amh, source_level = get_level(source.function_space().mesh())
         _, target_level = get_level(target.function_space().mesh())
@@ -78,7 +80,7 @@ class AdaptiveTransferManager(TransferManager):
 
             for split_label, _ in source_function_splits.items():
                 transfer_op(source_function_splits[split_label], target_function_splits[split_label]) 
-                
+            
             amh.recombine(target_function_splits, curr_target, child=order+1)
             curr_source = curr_target
 
