@@ -88,24 +88,6 @@ def run_div(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "direct
         return (eta, error_est)
 
 
-    def adapt(mesh, eta, theta):
-        W = FunctionSpace(mesh, "DG", 0)
-        markers = Function(W)
-
-        # We decide to refine an element if its error indicator
-        # is within a fraction of the maximum cellwise error indicator
-
-        # Access storage underlying our Function
-        # (a PETSc Vec) to get maximum value of eta
-        with eta.dat.vec_ro as eta_:
-            eta_max = eta_.max()[1]
-
-        should_refine = conditional(gt(eta, theta*eta_max), 1, 0)
-        markers.interpolate(should_refine)
-
-        refined_mesh = mesh.refine_marked_elements(markers)
-        return refined_mesh
-
     # def generate_u_real(mesh, p, alpha):
     #     V = FunctionSpace(mesh, "BDM", p)
     #     alpha = Constant(alpha)
@@ -243,7 +225,7 @@ def run_div(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "direct
                 "ksp_richardson_scale": 1/4,
                 "ksp_monitor_true_residual": None,
                 "mg_levels_ksp_monitor_true_residual": None,
-                "ksp_max_it": 3,
+                "ksp_max_it": 1,
                 **relax
             },
             "mg_coarse": coarse
@@ -351,11 +333,9 @@ def run_div(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "direct
         u_k = Function(V).assign(uh)
         k_l.append(k)
 
-        if not uniform:
-            if u_k.function_space().dim() <= dim:
-                mesh = adapt(mesh, eta, theta)
-                amh.add_mesh(mesh)
-                
+        if u_k.function_space().dim() <= dim and not uniform:
+            mesh = amh.adapt(eta, theta)
+            
         
         print(f"DOFS {dofs[-1]}: TIME {times[-1]}")
         level += 1

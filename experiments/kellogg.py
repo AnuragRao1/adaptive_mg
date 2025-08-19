@@ -311,10 +311,8 @@ def run_kellogg(p=2, theta=0.5, lam_alg=0.01, dim=1e3, solver="direct"):
             VTKFile(f"output/kellogg_{solver}/theta={theta}_lam={lam_alg}_dim={dim}/{p}/{level}_{k}.pvd").write(uh, ur, eh)
         k_l.append(k)
 
-        if not uniform:
-            mesh = adapt(mesh, eta)
-            if u_k.function_space().dim() <= dim:
-                amh.add_mesh(mesh)
+        if u_k.function_space().dim() <= dim and not uniform:
+            mesh = amh.adapt(mesh)
         
         print(f"DOFS {dofs[-1]}: TIME {times[-1]}")
         level += 1

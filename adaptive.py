@@ -17,6 +17,7 @@ class AdaptiveMeshHierarchy(HierarchyBase):
         self.refinements_per_level = refinements_per_level
         self.nested = nested
         set_level(mesh[0], self, 0)
+        self.split_cache = {}
         
     def add_mesh(self, mesh):
         if mesh.topological_dimension() <= 2:
@@ -93,6 +94,23 @@ class AdaptiveMeshHierarchy(HierarchyBase):
         ngmesh.Refine(adaptive=True)
         mesh = Mesh(ngmesh)
         self.add_mesh(mesh)
+
+    def adapt(self, eta, theta):
+        # Implement Dorfler marking, returns new mesh
+        mesh = self.meshes[-1]
+        W = FunctionSpace(mesh, "DG", 0)
+        markers = Function(W)
+
+        with eta.dat.vec_ro as eta_:
+            eta_max = eta_.max()[1]
+
+        should_refine = conditional(gt(eta, theta*eta_max), 1, 0)
+        markers.interpolate(should_refine)
+
+        refined_mesh = mesh.refine_marked_elements(markers)
+        self.add_mesh(refined_mesh)
+        return refined_mesh
+
     
     def split_function(self, u, child=True):
         #Split function across submeshes
@@ -102,22 +120,31 @@ class AdaptiveMeshHierarchy(HierarchyBase):
 
         ind = 1 if child else 0
         hierarchy_dict = self.submesh_hierarchies[int(level)-ind]
-        u_corr_space = Function(V.reconstruct(hierarchy_dict[[*hierarchy_dict][0]].meshes[ind].submesh_parent))
-        u_corr_space.dat.data[:] = u.dat.data
+        u_corr_space = Function(V.reconstruct(hierarchy_dict[[*hierarchy_dict][0]].meshes[ind].submesh_parent), val=u.dat)
+        key = (u, child)
+        try:
+            split_functions = self.split_cache[key]
+        except KeyError:
+            split_functions = self.split_cache.setdefault(key, {})
 
-        split_functions = {}
         for i in hierarchy_dict:
-            V_split = V.reconstruct(mesh=hierarchy_dict[i].meshes[ind])
-            assert V_split.mesh().submesh_parent == u_corr_space.function_space().mesh()
+            try:
+                f = split_functions[i].zero()
+            except KeyError:
+                V_split = V.reconstruct(mesh=hierarchy_dict[i].meshes[ind])
+                assert V_split.mesh().submesh_parent == u_corr_space.function_space().mesh()
+                f = split_functions.setdefault(i, Function(V_split, name=str(i)))
+
             if isinstance(u, Function):
-                split_functions[i] = Function(V_split, name=str(i)).assign(u_corr_space)
+                f.assign(u_corr_space)
             elif isinstance(u, Cofunction):
-                split_functions[i] = cofun_assign(u_corr_space, Cofunction(V_split, name=str(i)))
+                cofun_assign(u_corr_space, f)
 
         return split_functions
     
+    
     def use_weight(self, V, child):
-        # counts of nodes across submeshes, to fix restriction before recombinatoin
+        # counts of DoFs across submeshes, to fix restriction before recombinatoin
         w = Function(V).assign(1)
         splits = self.split_function(w, child)
 
@@ -143,10 +170,8 @@ class AdaptiveMeshHierarchy(HierarchyBase):
             if isinstance(f_label, Function):
                 if child:
                     split_label = int("10" + str(split_label))
-                    # f_label.interpolate(val, subset=parent_mesh.cell_subset(split_label))
                     f_label.assign(val, allow_missing_dofs=True)
                 else:
-                    # f_label.interpolate(val, subset=parent_mesh.cell_subset(split_label))
                     f_label.assign(val, allow_missing_dofs=True)
             if isinstance(f_label, Cofunction):
                 if child:
@@ -165,11 +190,9 @@ def get_c2f_f2c_fd(mesh, coarse_mesh):
     num_parents = coarse_mesh.num_cells()
     
     if mesh.topology_dm.getDimension() == 2:
-        # parents = ngmesh.GetParentSurfaceElements()
         parents = ngmesh.parentsurfaceelements.NumPy()
         elements = ngmesh.Elements2D()
     if mesh.topology_dm.getDimension() == 3:
-        # parents = ngmesh.GetParentElements()
         parents = ngmesh.parentelements.NumPy()
         elements = ngmesh.Elements3D()
     fine_mapping = lambda x: mesh._cell_numbering.getOffset(x)
@@ -220,9 +243,6 @@ def split_to_submesh(mesh, coarse_mesh, c2f, f2c):
     for i in range(1, max_children+1):
         fine_splits[i].dat.data[num_children[f2c.squeeze()] == i] = 1
 
-    # [VTKFile(f"output/{i}_{len(f2c)}_coarse.pvd").write(coarse_splits[i]) for i in coarse_splits]
-    # [VTKFile(f"output/{i}_{len(f2c)}_fine.pvd").write(fine_splits[i]) for i in fine_splits]
-
     return coarse_splits, fine_splits, num_children
  
 def full_to_sub(mesh, submesh, label):
@@ -245,7 +265,6 @@ def cofun_assign(rsource, rtarget, subset=None):
     utarget = cofun_as_function(rtarget)
     temp = Function(utarget.function_space())
     assert temp.function_space().mesh().submesh_parent == usource.function_space().mesh() or temp.function_space().mesh() == usource.function_space().mesh().submesh_parent
-    # temp.interpolate(usource, subset=subset)
     temp.assign(usource, allow_missing_dofs=True)
     utarget.assign(utarget + temp)
     return rtarget

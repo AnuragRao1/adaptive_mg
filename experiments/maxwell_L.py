@@ -90,24 +90,6 @@ def run_maxwell(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "di
             error_est = sqrt(eta_.dot(eta_))
         return (eta, error_est)
 
-
-    def adapt(mesh, eta, theta):
-        W = FunctionSpace(mesh, "DG", 0)
-        markers = Function(W)
-
-        # We decide to refine an element if its error indicator
-        # is within a fraction of the maximum cellwise error indicator
-
-        # Access storage underlying our Function
-        # (a PETSc Vec) to get maximum value of eta
-        with eta.dat.vec_ro as eta_:
-            eta_max = eta_.max()[1]
-
-        should_refine = conditional(gt(eta, theta*eta_max), 1, 0)
-        markers.interpolate(should_refine)
-
-        refined_mesh = mesh.refine_marked_elements(markers)
-        return refined_mesh
     
     # def generate_u_real(mesh, p, alpha):
     #     V = FunctionSpace(mesh, "N1curl", p)
@@ -342,10 +324,8 @@ def run_maxwell(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "di
         VTKFile(f"output/maxwell_L_{solver}/theta={theta}_lam={lam_alg}_alpha={alpha}_dim={dim}/{p}/{level}_{k}.pvd").write(uh, ur, eh)
         k_l.append(k)
 
-        if not uniform:
-            if u_k.function_space().dim() <= dim:
-                mesh = adapt(mesh, eta, theta)
-                amh.add_mesh(mesh)
+        if u_k.function_space().dim() <= dim and not uniform:
+            mesh = amh.adapt(eta, theta)
                 
         
         print(f"DOFS {dofs[-1]}: TIME {times[-1]}")
