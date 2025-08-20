@@ -176,9 +176,9 @@ class AdaptiveMeshHierarchy(HierarchyBase):
             if isinstance(f_label, Cofunction):
                 if child:
                     split_label = int("10" + str(split_label))
-                    f_label = cofun_assign(val, f_label, subset=parent_mesh.cell_subset(split_label))
+                    f_label = cofun_assign(val, f_label)
                 else: 
-                    f_label = cofun_assign(val, f_label, subset=parent_mesh.cell_subset(split_label))
+                    f_label = cofun_assign(val, f_label)
         return f
 
 
@@ -259,7 +259,7 @@ def full_to_sub(mesh, submesh, label):
 def cofun_as_function(c):
     return Function(c.function_space().dual(), val=c.dat)
 
-def cofun_assign(rsource, rtarget, subset=None):
+def cofun_assign(rsource, rtarget):
     # Workaround to call interpolate on Cofunctions, only used for restrictions
     usource = cofun_as_function(rsource)
     utarget = cofun_as_function(rtarget)

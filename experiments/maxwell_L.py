@@ -13,6 +13,7 @@ from itertools import accumulate
 import time
 import csv
 import ufl
+import json
 
 import sys
 import os
@@ -23,7 +24,7 @@ from adaptive_transfer_manager import AdaptiveTransferManager
 
     
 def run_maxwell(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "direct"):
-    def solve_maxwell(mesh, p, u_prev, u_real, params, uniform):
+    def solve_maxwell(mesh, p, u_prev, u_real, params):
         V = FunctionSpace(mesh, "N1curl", p)
         uh = u_prev
         v = TestFunction(V)
@@ -35,16 +36,15 @@ def run_maxwell(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "di
         
         problem = NonlinearVariationalProblem(F, uh, bc)
 
-        if not uniform:
-            dm = uh.function_space().dm
-            old_appctx = get_appctx(dm)
-            mat_type = params["mat_type"]
-            appctx = _SNESContext(problem, mat_type, mat_type, old_appctx)
-            appctx.transfer_manager = atm
-            solver = NonlinearVariationalSolver(problem, solver_parameters=params)
-            solver.set_transfer_manager(atm)
-            # with dmhooks.add_hooks(dm, solver, appctx=appctx, save=False):
-            #     coarsen(problem, coarsen)
+        dm = uh.function_space().dm
+        old_appctx = get_appctx(dm)
+        mat_type = params["mat_type"]
+        appctx = _SNESContext(problem, mat_type, mat_type, old_appctx)
+        appctx.transfer_manager = atm
+        solver = NonlinearVariationalSolver(problem, solver_parameters=params)
+        solver.set_transfer_manager(atm)
+        # with dmhooks.add_hooks(dm, solver, appctx=appctx, save=False):
+        #     coarsen(problem, coarsen)
 
         _, level = get_level(mesh)
         with PETSc.Log.Event(f"adaptive_{level}"):
@@ -90,46 +90,6 @@ def run_maxwell(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "di
             error_est = sqrt(eta_.dot(eta_))
         return (eta, error_est)
 
-    
-    # def generate_u_real(mesh, p, alpha):
-    #     V = FunctionSpace(mesh, "N1curl", p)
-    #     alpha = Constant(alpha)
-    #     x, y = SpatialCoordinate(mesh)
-    #     r = sqrt(x**2 + y**2)
-    #     theta = atan2(y, x)
-    #     theta = conditional(lt(theta, 0), theta + 2 * pi, theta) # map to [0 , 2pi]
-    #     u_real = as_vector([-r**alpha * sin(alpha * theta), r**alpha * cos(alpha * theta)])
-    #     return u_real
-    
-    # def generate_u_real(mesh, p, alpha):
-    #     u_real = Function(FunctionSpace(mesh, "CG", p), name="u_real")
-    #     x, y = SpatialCoordinate(mesh)
-
-    #     r = sqrt(x**2 + y**2)
-    #     phi = atan2(y, x)
-    #     phi = conditional(lt(phi, 0), phi + 2 * pi, phi) # map to [0 , 2pi]
-
-    #     alpha = Constant(0.1)
-    #     beta = Constant(-14.92256510455152)
-    #     delta = Constant(pi / 4)
-
-    #     mu = conditional(
-    #         lt(phi, pi/2),
-    #         cos((pi/2 - beta) * alpha) * cos((phi - pi/2 + delta) * alpha),
-    #         conditional(
-    #             lt(phi, pi),
-    #             cos(delta * alpha) * cos((phi - pi + beta) * alpha),
-    #             conditional(
-    #                 lt(phi, 3*pi/2),
-    #                 cos(beta * alpha) * cos((phi - pi - delta) * alpha),
-    #                 cos((pi/2 - delta) * alpha) * cos((phi - 3*pi/2 - beta) * alpha)
-    #             )
-    #         )
-    #     )
-
-    #     u_expr = r**alpha * mu
-    #     u_real = as_vector([u_expr, u_expr])
-    #     return u_real
     def generate_u_real(mesh, p, alpha):
         V = FunctionSpace(mesh, "N1curl", p)
         x, y = SpatialCoordinate(mesh)
@@ -213,7 +173,7 @@ def run_maxwell(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "di
 
         return {
             "mat_type": mat_type,
-            "ksp_type": "gmres",
+            "ksp_type": "fgmres",
             "pc_type": "mg",
             "mg_levels": {
                 "ksp_type": "richardson",
@@ -253,14 +213,10 @@ def run_maxwell(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "di
         param_set = chol
     if solver == "mg":
         param_set = patch_relax
-    # ITERATIVE LOOP
-
-    # max_iterations = max_iterations
-
-    uniform = False
-    if uniform:
-        mesh2 = Mesh(ngmsh)
-        mh = MeshHierarchy(mesh2, 9)
+    json_str = json.dumps(param_set, indent=4)
+    os.makedirs(f"output/maxwell_L_{solver}/theta={theta}_lam={lam_alg}_alpha={alpha}_dim={dim}/{p}", exist_ok=True)
+    with open(f"output/maxwell_L_{solver}/theta={theta}_lam={lam_alg}_alpha={alpha}_dim={dim}/{p}/param.json", "w") as f:
+        f.write(json_str)
 
     error_estimators = {}
     true_errors = []
@@ -279,9 +235,6 @@ def run_maxwell(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "di
         writer.writerow(["dof", "error_est","error_true", "k", "time"])
 
     while level == 0 or u_k.function_space().dim() <= dim:
-        if uniform:
-            mesh = mh[level]
-
         print(f"level {level}")
         V = FunctionSpace(mesh, "N1curl", p)
         uh = Function(V, name="solution")
@@ -301,7 +254,7 @@ def run_maxwell(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "di
             u_prev.interpolate(uh)
                         
             start = time.time()
-            (uh, f) = solve_maxwell(mesh, p, uh, u_real, param_set, uniform)
+            (uh, f) = solve_maxwell(mesh, p, uh, u_real, param_set)
             times.append(time.time() - start)
 
             (eta, error_est) = estimate_error(mesh, uh, u_real, f) 
@@ -324,7 +277,7 @@ def run_maxwell(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "di
         VTKFile(f"output/maxwell_L_{solver}/theta={theta}_lam={lam_alg}_alpha={alpha}_dim={dim}/{p}/{level}_{k}.pvd").write(uh, ur, eh)
         k_l.append(k)
 
-        if u_k.function_space().dim() <= dim and not uniform:
+        if u_k.function_space().dim() <= dim:
             mesh = amh.adapt(eta, theta)
                 
         
