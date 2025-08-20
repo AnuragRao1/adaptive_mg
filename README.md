@@ -21,8 +21,9 @@ The parameters are as follows:
   -mg: multigrid (implemented with patch relaxation)
 
 To generate the plots for each system, run \
-`python plot_expr.py --system curl --p None --theta 0.5 --lam_alg 0.01 --alpha 2/3 --dim 1e4 --solver direct --dir_name None --w_uniform False`
+`python plot_expr.py --system curl --p None --theta 0.5 --lam_alg 0.01 --alpha 2/3 --dim 1e4 --solver direct --dir_name None --w_uniform False --unif_dir None`
 
 The parameters are the same as above, with the only new ones being
-- dir_name: allows the user to specify the directory of data if the generated results were renamed/moved into a different location. To be input as a string "path/to/data"
+- dir_name: str value. allows the user to specify the directory of data if the generated results were renamed/moved into a different location. To be input as a string "path/to/data"
 - w_uniform: Boolean value. Controls whether convergence plots for adaptively refined (theta != 0) are to be plotted against uniform (theta = 0)
+- unif_dir: str value. allows user to specify directory of uniformly refined data if renamed/moved. Input as string "path/to/uniform/data"
