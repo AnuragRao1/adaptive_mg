@@ -29,8 +29,10 @@ def run_maxwell(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "di
         uh = u_prev
         v = TestFunction(V)
         bc = DirichletBC(V, u_real, "on_boundary")
+        # bc = DirichletBC(V, as_vector([Constant(0), Constant(0)]), "on_boundary")
 
         f_expr = curl(curl(u_real)) + u_real
+        # f_expr = as_vector([Constant(1), Constant(0)])
 
         F = (inner(curl(uh), curl(v)) + inner(uh, v) - inner(f_expr,v)) * dx
         
@@ -80,7 +82,8 @@ def run_maxwell(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "di
             + inner(h('-') * jump(curl_E_cross_n, n)**2, w('-')) * dS)
         eta_boundary = assemble(inner(h * dot(u_real - uh, t)**2, w) * ds)
         print(f"Vol: {sqrt(sum(eta_vol.dat.data))}, Jump: {sqrt(sum(eta_jump.dat.data))}, Boundary: {sqrt(sum(eta_boundary.dat.data))}")
-        
+        # print(f"Vol: {sqrt(sum(eta_vol.dat.data))}, Jump: {sqrt(sum(eta_jump.dat.data))}")
+
         sp = {"mat_type": "matfree", "ksp_type": "richardson", "pc_type": "jacobi"}
         solve(G == 0, eta_sq, solver_parameters=sp)
 
@@ -103,10 +106,11 @@ def run_maxwell(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "di
 
         # k = Constant(20)
         # return grad(sin(k * x) * sin(k * y))
+        return grad(r**alpha * sin(alpha * theta))
 
         # return as_vector([chi * r**(alpha) * x, chi * r**(alpha) * y])
         # return as_vector([-r**(-1/2) * y, r**(-1/2)*x])
-        return as_vector([r**alpha * cos(alpha * theta), r**alpha * sin(alpha * theta)])
+        # return as_vector([r**alpha * cos(alpha * theta), r**alpha * sin(alpha * theta)])
         # g = exp(- ((x - 0.5)**2 + (y - 0.5)**2) / 0.2**2)
         # return as_vector([g, 1/2 * g])
 
@@ -176,9 +180,10 @@ def run_maxwell(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "di
             "ksp_type": "fgmres",
             "pc_type": "mg",
             "mg_levels": {
-                "ksp_type": "richardson",
-                "ksp_richardson_scale": 1/4,
-                "ksp_max_it": 3,
+                "ksp_type": "chebyshev",
+                # "ksp_richardson_scale": 1/5,
+                "ksp_chebyshev_esteig": "0.25,0.25,0.25,1.25",
+                "ksp_max_it": 1,
                 **relax
             },
             "mg_coarse": coarse
@@ -279,7 +284,7 @@ def run_maxwell(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "di
 
         if u_k.function_space().dim() <= dim:
             mesh = amh.adapt(eta, theta)
-                
+            
         
         print(f"DOFS {dofs[-1]}: TIME {times[-1]}")
         level += 1
