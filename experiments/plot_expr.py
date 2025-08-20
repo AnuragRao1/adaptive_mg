@@ -7,14 +7,17 @@ import argparse
 systems = {"curl": "maxwell_L", "div": "div_L", "kellogg": "kellogg", "grad": "grad"}
 
 
-def plot_system(system="curl", p=None, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e4, solver="direct", dir_name = None, w_uniform=False):
+def plot_system(system="curl", p=None, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e4, solver="direct", dir_name = None, w_uniform=False, unif_dir=None):
     sys_name = systems[system]
     if not dir_name:
         if system == "curl" or system == "div":
             dir_name = f"output/{sys_name}_{solver}/theta={theta}_lam={lam_alg}_alpha={alpha}_dim={dim}"
-            unif_dir = f"output/{sys_name}_{solver}/theta=0.0_lam={lam_alg}_alpha={alpha}_dim={dim}"
         else:
             dir_name = f"output/{sys_name}_{solver}/theta={theta}_lam={lam_alg}_dim={dim}"
+    if not unif_dir:
+        if system == "curl" or system == "div":
+            unif_dir = f"output/{sys_name}_{solver}/theta=0.0_lam={lam_alg}_alpha={alpha}_dim={dim}"
+        else:
             unif_dir = f"output/{sys_name}_{solver}/theta=0.0_lam={lam_alg}_dim={dim}"
 
     dofs = {}
@@ -190,6 +193,7 @@ def main():
                         help="Solver type (for now the only choices are direct or multigrid through patch relaxation).")
     parser.add_argument("--dir_name", type=str, default=None, help="Custom data directory (if not using default, rename, etc.)")
     parser.add_argument("--w_uniform", type=bool, default=False, help="Plot convergence vs uniform?")
+    parser.add_argument("--unif_dir", type=str, default=None, help="Custom data directory, if plotting with uniform and uniform directory has been moved/renamed")
 
     args = parser.parse_args()
 
@@ -203,7 +207,8 @@ def main():
         dim=args.dim,
         solver=args.solver,
         dir_name=args.dir_name,
-        w_uniform=args.w_uniform
+        w_uniform=args.w_uniform,
+        unif_dir=args.unif_dir
     )
 
 if __name__ == "__main__":
