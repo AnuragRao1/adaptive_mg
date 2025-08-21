@@ -1,4 +1,4 @@
-For a demo for how to use the AdaptiveMeshHierarchy and AdaptiveTransferManager, see demo/demo.py.rst. \
+For a demo for how to use the AdaptiveMeshHierarchy and AdaptiveTransferManager, see [demo/demo.py.rst](https://github.com/AnuragRao1/adaptive_mg/blob/main/demo/demo.py.rst). \
 To use the code, the dev version of Firedrake must be installed. Installation instructions can be found [here](https://www.firedrakeproject.org/install.html). The branch 'arao/atm' is needed to run this code. Another version of Netgen different than the one in the main installation instructions is also necessary. This can be installed with the command `pip install --pre netgen-mesher`.
 
 To run the experiments, first move into the experiments directory with `cd experiments`.
