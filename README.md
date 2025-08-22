@@ -3,7 +3,7 @@ To use the code, the dev version of Firedrake must be installed. Installation in
 
 To run the experiments, first move into the experiments directory with `cd experiments`.
 The central command for running each: \
-`python run_expr.py --system curl --p None --theta 0.5 --lam_alg 0.01 --alpha 2/3 --dim 1e4 --solver direct`
+`python run_expr.py --system curl --p None --theta 0.5 --lam_alg 0.01 --alpha 2/3 --dim 1e4 --solver direct --experiment bump`
 
 The parameters are as follows:
 - system: which system wants to be run. The options are
@@ -19,9 +19,10 @@ The parameters are as follows:
 - solver: There are two options (specific parameter options can be found/changed in each experiment script):
   -direct: Direct solvers
   -mg: multigrid (implemented with patch relaxation)
+-experiment: which experiment to run, input as a string. Options are "bump", "donut", and "unknown"
 
 To generate the plots for each system, run \
-`python plot_expr.py --system curl --p None --theta 0.5 --lam_alg 0.01 --alpha 2/3 --dim 1e4 --solver direct --dir_name None --w_uniform False --unif_dir None`
+`python plot_expr.py --system curl --p None --theta 0.5 --lam_alg 0.01 --alpha 2/3 --dim 1e4 --solver direct --experiment bump --dir_name None --w_uniform False --unif_dir None`
 
 The parameters are the same as above, with the only new ones being
 - dir_name: str value. allows the user to specify the directory of data if the generated results were renamed/moved into a different location. To be input as a string "path/to/data"
