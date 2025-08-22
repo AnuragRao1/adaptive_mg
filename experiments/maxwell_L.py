@@ -23,16 +23,18 @@ from adaptive_transfer_manager import AdaptiveTransferManager
 
 
     
-def run_maxwell(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "direct"):
-    def solve_maxwell(mesh, p, u_prev, u_real, params):
+def run_maxwell(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "direct", experiment = "bump"):
+    def solve_maxwell(mesh, p, u_prev, u_real, params, experiment):
         V = FunctionSpace(mesh, "N1curl", p)
         uh = u_prev
         v = TestFunction(V)
-        bc = DirichletBC(V, u_real, "on_boundary")
-        # bc = DirichletBC(V, as_vector([Constant(0), Constant(0)]), "on_boundary")
+        if experiment != "unknown":
+            bc = DirichletBC(V, u_real, "on_boundary")
+            f_expr = curl(curl(u_real)) + u_real
+        else:
+            bc = DirichletBC(V, as_vector([Constant(0), Constant(0)]), "on_boundary")
+            f_expr = as_vector([Constant(1), Constant(0)])
 
-        f_expr = curl(curl(u_real)) + u_real
-        # f_expr = as_vector([Constant(1), Constant(0)])
 
         F = (inner(curl(uh), curl(v)) + inner(uh, v) - inner(f_expr,v)) * dx
         
@@ -55,7 +57,7 @@ def run_maxwell(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "di
         return uh, f_expr
 
 
-    def estimate_error(mesh, uh, u_real, f):
+    def estimate_error(mesh, uh, u_real, f, experiment):
         W = FunctionSpace(mesh, "DG", 0)
         eta_sq = Function(W)
         w = TestFunction(W)
@@ -67,22 +69,28 @@ def run_maxwell(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "di
         cross = lambda a,b: a[0] * b[1] - a[1] * b[0]
         curl_E_cross_n = curl(cross(uh,n))
         curl_E_cross_n = curl(uh)
-        G = (
-            inner(eta_sq / v, w) * dx 
-            - inner(h**2 * (curl(curl(uh)) + uh - f)**2, w) * dx
-            # - inner(h**2 * curl(curl(curl(uh)) + uh - f)**2, w) * dx # added from H(curl) norm
-            - inner(h('+') * jump(curl_E_cross_n, n)**2, w('+')) * dS
-            - inner(h('-') * jump(curl_E_cross_n, n)**2, w('-')) * dS
-            - inner(h * dot(u_real - uh, t)**2, w) * ds
-            )
-        
-        # eta_vol = assemble(inner(h**2 * (curl(curl(uh)) + uh - f)**2, w) * dx + inner(h**2 * curl(curl(curl(uh)) + uh - f)**2, w) * dx)
         eta_vol = assemble(inner(h**2 * (curl(curl(uh)) + uh - f)**2, w) * dx)
         eta_jump = assemble(inner(h('+') * jump(curl_E_cross_n, n)**2, w('+')) * dS
             + inner(h('-') * jump(curl_E_cross_n, n)**2, w('-')) * dS)
-        eta_boundary = assemble(inner(h * dot(u_real - uh, t)**2, w) * ds)
-        print(f"Vol: {sqrt(sum(eta_vol.dat.data))}, Jump: {sqrt(sum(eta_jump.dat.data))}, Boundary: {sqrt(sum(eta_boundary.dat.data))}")
-        # print(f"Vol: {sqrt(sum(eta_vol.dat.data))}, Jump: {sqrt(sum(eta_jump.dat.data))}")
+        
+        if experiment != "unknown":
+            G = (
+                inner(eta_sq / v, w) * dx 
+                - inner(h**2 * (curl(curl(uh)) + uh - f)**2, w) * dx
+                - inner(h('+') * jump(curl_E_cross_n, n)**2, w('+')) * dS
+                - inner(h('-') * jump(curl_E_cross_n, n)**2, w('-')) * dS
+                - inner(h * dot(u_real - uh, t)**2, w) * ds
+                )
+            eta_boundary = assemble(inner(h * dot(u_real - uh, t)**2, w) * ds)
+            print(f"Vol: {sqrt(sum(eta_vol.dat.data))}, Jump: {sqrt(sum(eta_jump.dat.data))}, Boundary: {sqrt(sum(eta_boundary.dat.data))}")
+        else:
+            G = (
+                inner(eta_sq / v, w) * dx 
+                - inner(h**2 * (curl(curl(uh)) + uh - f)**2, w) * dx
+                - inner(h('+') * jump(curl_E_cross_n, n)**2, w('+')) * dS
+                - inner(h('-') * jump(curl_E_cross_n, n)**2, w('-')) * dS
+                )        
+            print(f"Vol: {sqrt(sum(eta_vol.dat.data))}, Jump: {sqrt(sum(eta_jump.dat.data))}")
 
         sp = {"mat_type": "matfree", "ksp_type": "richardson", "pc_type": "jacobi"}
         solve(G == 0, eta_sq, solver_parameters=sp)
@@ -93,66 +101,64 @@ def run_maxwell(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "di
             error_est = sqrt(eta_.dot(eta_))
         return (eta, error_est)
 
-    def generate_u_real(mesh, p, alpha):
-        V = FunctionSpace(mesh, "N1curl", p)
+    def generate_u_real(mesh, p, alpha, experiment):
         x, y = SpatialCoordinate(mesh)
-        r = sqrt(x**2 + y**2)
-        chi = conditional(lt(r, 0.1), exp(- (0.1**2) / (0.1**2 - r**2)), 0)
-        theta = atan2(y, x)
-        theta = conditional(lt(theta, 0), theta + 2 * pi, theta) # map to [0 , 2pi]
 
-        # return as_vector([sin(2 * pi * x) * sin(pi * y), cos(pi * x) * sin(2 * pi * y)])
+        if experiment == "donut":
+            r = sqrt(x**2 + y**2)
+            theta = atan2(y, x)
+            theta = conditional(lt(theta, 0), theta + 2 * pi, theta) # map to [0 , 2pi]
+            chi = conditional(lt(r, 0.1), exp(- (0.1**2) / (0.1**2 - r**2)), 0)
+            return as_vector([chi * r**alpha * x, chi * r**alpha * y])
+        elif experiment == "bump":
+            g = exp(- ((x - 0.5)**2 + (y - 0.5)**2) / 0.2**2)
+            return as_vector([g, 1/2 * g])
+        else:
+            return as_vector([Constant(0), Constant(0)])
+
+    if experiment == "unknown":
+        rect1 = WorkPlane(Axes((-1,-1,0), n=Z, h=X)).Rectangle(1,2).Face()
+        rect2 = WorkPlane(Axes((-1,0,0), n=Z, h=X)).Rectangle(2,1).Face()
+        L = rect1 + rect2
+
+        geo = OCCGeometry(L, dim=2)
+        ngmsh = geo.GenerateMesh(maxh=0.1)
+        mesh = Mesh(ngmsh)
+
+    else:
+        from netgen.meshing import Mesh as NetgenMesh
+        from netgen.meshing import MeshPoint, Element2D, FaceDescriptor, Element1D 
+        from netgen.csg import Pnt 
+        
+        ngmesh = NetgenMesh(dim=2) 
+        
+        fd = ngmesh.Add(FaceDescriptor(bc=1,domin=1,surfnr=1)) 
+        
+        pnums = [] 
+        pnums.append(ngmesh.Add(MeshPoint(Pnt(-1, -1, 0)))) 
+        pnums.append(ngmesh.Add(MeshPoint(Pnt(-1, 1, 0))))  
+        pnums.append(ngmesh.Add(MeshPoint(Pnt( 1, 1, 0))))  
+        pnums.append(ngmesh.Add(MeshPoint(Pnt( 1, -1, 0)))) 
+        pnums.append(ngmesh.Add(MeshPoint(Pnt( 0, 0, 0))))  
+        
+        ngmesh.Add(Element2D(fd, [pnums[0], pnums[1], pnums[4]]))  
+        ngmesh.Add(Element2D(fd, [pnums[1], pnums[2], pnums[4]]))  
+        ngmesh.Add(Element2D(fd, [pnums[2], pnums[3], pnums[4]]))  
+        ngmesh.Add(Element2D(fd, [pnums[3], pnums[0], pnums[4]])) 
+        
+        ngmesh.Add(Element1D([pnums[0], pnums[1]], index=1)) 
+        ngmesh.Add(Element1D([pnums[1], pnums[2]], index=1)) 
+        ngmesh.Add(Element1D([pnums[2], pnums[3]], index=1)) 
+        ngmesh.Add(Element1D([pnums[0], pnums[3]], index=1))
+        for i in range(2):
+            for l, el in enumerate(ngmesh.Elements2D()):
+                el.refine = 1
+            ngmesh.Refine(adaptive=True)
+        mesh = Mesh(ngmesh)
 
 
-        # k = Constant(20)
-        # return grad(sin(k * x) * sin(k * y))
-        return grad(r**alpha * sin(alpha * theta))
 
-        # return as_vector([chi * r**(alpha) * x, chi * r**(alpha) * y])
-        # return as_vector([-r**(-1/2) * y, r**(-1/2)*x])
-        # return as_vector([r**alpha * cos(alpha * theta), r**alpha * sin(alpha * theta)])
-        # g = exp(- ((x - 0.5)**2 + (y - 0.5)**2) / 0.2**2)
-        # return as_vector([g, 1/2 * g])
-
-
-
-
-
-    rect1 = WorkPlane(Axes((-1,-1,0), n=Z, h=X)).Rectangle(1,2).Face()
-    rect2 = WorkPlane(Axes((-1,0,0), n=Z, h=X)).Rectangle(2,1).Face()
-    L = rect1 + rect2
-
-    geo = OCCGeometry(L, dim=2)
-    ngmsh = geo.GenerateMesh(maxh=0.1)
-    mesh = Mesh(ngmsh)
-
-
-    # from netgen.meshing import Mesh as NetgenMesh
-    # from netgen.meshing import MeshPoint, Element2D, FaceDescriptor, Element1D 
-    # from netgen.csg import Pnt 
     
-    # ngmesh = NetgenMesh(dim=2) 
-    
-    # fd = ngmesh.Add(FaceDescriptor(bc=1,domin=1,surfnr=1)) 
-    
-    # pnums = [] 
-    # pnums.append(ngmesh.Add(MeshPoint(Pnt(-1, -1, 0)))) 
-    # pnums.append(ngmesh.Add(MeshPoint(Pnt(-1, 1, 0))))  
-    # pnums.append(ngmesh.Add(MeshPoint(Pnt( 1, 1, 0))))  
-    # pnums.append(ngmesh.Add(MeshPoint(Pnt( 1, -1, 0)))) 
-    # pnums.append(ngmesh.Add(MeshPoint(Pnt( 0, 0, 0))))  
-    
-    # ngmesh.Add(Element2D(fd, [pnums[0], pnums[1], pnums[4]]))  
-    # ngmesh.Add(Element2D(fd, [pnums[1], pnums[2], pnums[4]]))  
-    # ngmesh.Add(Element2D(fd, [pnums[2], pnums[3], pnums[4]]))  
-    # ngmesh.Add(Element2D(fd, [pnums[3], pnums[0], pnums[4]])) 
-    
-    # ngmesh.Add(Element1D([pnums[0], pnums[1]], index=1)) 
-    # ngmesh.Add(Element1D([pnums[1], pnums[2]], index=1)) 
-    # ngmesh.Add(Element1D([pnums[2], pnums[3]], index=1)) 
-    # ngmesh.Add(Element1D([pnums[0], pnums[3]], index=1))
-    # mesh = Mesh(ngmesh)
-
 
     amh = AdaptiveMeshHierarchy([mesh])
     atm = AdaptiveTransferManager()
@@ -219,8 +225,8 @@ def run_maxwell(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "di
     if solver == "mg":
         param_set = patch_relax
     json_str = json.dumps(param_set, indent=4)
-    os.makedirs(f"output/maxwell_L_{solver}/theta={theta}_lam={lam_alg}_alpha={alpha}_dim={dim}/{p}", exist_ok=True)
-    with open(f"output/maxwell_L_{solver}/theta={theta}_lam={lam_alg}_alpha={alpha}_dim={dim}/{p}/param.json", "w") as f:
+    os.makedirs(f"output/maxwell_L_{solver}/{experiment}_theta={theta}_lam={lam_alg}_alpha={alpha}_dim={dim}/{p}", exist_ok=True)
+    with open(f"output/maxwell_L_{solver}/{experiment}_theta={theta}_lam={lam_alg}_alpha={alpha}_dim={dim}/{p}/param.json", "w") as f:
         f.write(json_str)
 
     error_estimators = {}
@@ -232,7 +238,7 @@ def run_maxwell(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "di
     start_time = time.time()
     times.append(start_time)
     level = 0
-    csv_file = f"output/maxwell_L_{solver}/theta={theta}_lam={lam_alg}_alpha={alpha}_dim={dim}/{p}/dat.csv"
+    csv_file = f"output/maxwell_L_{solver}/{experiment}_theta={theta}_lam={lam_alg}_alpha={alpha}_dim={dim}/{p}/dat.csv"
     os.makedirs(os.path.dirname(csv_file), exist_ok=True)
 
     with open(csv_file, mode='w', newline='') as f:
@@ -251,7 +257,7 @@ def run_maxwell(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "di
 
         k = 0
         error_est = 0
-        u_real = generate_u_real(mesh, p, alpha)
+        u_real = generate_u_real(mesh, p, alpha, experiment)
 
 
         while norm(uh - u_prev) > lam_alg * error_est or k == 0:
@@ -259,10 +265,10 @@ def run_maxwell(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "di
             u_prev.interpolate(uh)
                         
             start = time.time()
-            (uh, f) = solve_maxwell(mesh, p, uh, u_real, param_set)
+            (uh, f) = solve_maxwell(mesh, p, uh, u_real, param_set, experiment)
             times.append(time.time() - start)
 
-            (eta, error_est) = estimate_error(mesh, uh, u_real, f) 
+            (eta, error_est) = estimate_error(mesh, uh, u_real, f, experiment) 
             print("ERROR ESTIMATE: ", error_est)
 
             if level not in error_estimators:
@@ -279,7 +285,7 @@ def run_maxwell(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "di
         u_k = Function(V).interpolate(uh)
         ur = Function(V, name="exact").interpolate(u_real)
         eh = Function(V, name="error").interpolate(ur - uh)            
-        VTKFile(f"output/maxwell_L_{solver}/theta={theta}_lam={lam_alg}_alpha={alpha}_dim={dim}/{p}/{level}_{k}.pvd").write(uh, ur, eh)
+        VTKFile(f"output/maxwell_L_{solver}/{experiment}_theta={theta}_lam={lam_alg}_alpha={alpha}_dim={dim}/{p}/{level}_{k}.pvd").write(uh, ur, eh)
         k_l.append(k)
 
         if u_k.function_space().dim() <= dim:
