@@ -15,11 +15,12 @@ The parameters are as follows:
 - theta: Dorfler marking parameter, theta in [0,1]
 - lam_alg: iterative solver parameter that controls convergence, lam_alg > 0.
 - alpha: exponent to radial component for curl/div problems. alpha in (0,1)
+- experiment: which experiment to run, input as a string. Options are "bump", "donut", and "unknown"
 - dim: Number of maximum degrees of freedom to refine mesh until
 - solver: There are two options (specific parameter options can be found/changed in each experiment script):
   -direct: Direct solvers
   -mg: multigrid (implemented with patch relaxation)
--experiment: which experiment to run, input as a string. Options are "bump", "donut", and "unknown"
+
 
 To generate the plots for each system, run \
 `python plot_expr.py --system curl --p None --theta 0.5 --lam_alg 0.01 --alpha 2/3 --dim 1e4 --solver direct --experiment bump --dir_name None --w_uniform False --unif_dir None`
