@@ -135,11 +135,7 @@ class AdaptiveMeshHierarchy(HierarchyBase):
                 assert V_split.mesh().submesh_parent == u_corr_space.function_space().mesh()
                 f = split_functions.setdefault(i, Function(V_split, name=str(i)))
 
-            if isinstance(u, Function):
-                f.assign(u_corr_space)
-            elif isinstance(u, Cofunction):
-                cofun_assign(u_corr_space, f)
-
+            f.assign(u_corr_space)
         return split_functions
     
     
@@ -167,18 +163,13 @@ class AdaptiveMeshHierarchy(HierarchyBase):
 
         for split_label, val in split_funcs.items():
             assert val.function_space().mesh().submesh_parent == parent_mesh
+            if child:
+                split_label = int("10" + str(split_label))
             if isinstance(f_label, Function):
-                if child:
-                    split_label = int("10" + str(split_label))
-                    f_label.assign(val, allow_missing_dofs=True)
-                else:
-                    f_label.assign(val, allow_missing_dofs=True)
-            if isinstance(f_label, Cofunction):
-                if child:
-                    split_label = int("10" + str(split_label))
-                    f_label = cofun_assign(val, f_label)
-                else: 
-                    f_label = cofun_assign(val, f_label)
+                f_label.assign(val, allow_missing_dofs=True)
+            else:
+                curr = Function(f_label.function_space()).assign(val, allow_missing_dofs=True)
+                f_label.assign(f_label + curr) # partition of unity for restriction
         return f
 
 
@@ -202,7 +193,7 @@ def get_c2f_f2c_fd(mesh, coarse_mesh):
     f2c = [[] for _ in range(mesh.num_cells())]
 
     if parents.shape[0] == 0:
-        raise Exception("Added mesh has not refined any cells")
+        raise Exception("Added mesh has not refined any cells from previous mesh")
     for l,_ in enumerate(elements):
         if parents[l][0] == -1 or l < num_parents:
             f2c[fine_mapping(l)].append(coarse_mapping(l))
@@ -255,16 +246,3 @@ def full_to_sub(mesh, submesh, label):
     u1.interpolate(u2, subset=mesh.cell_subset(label))
     
     return lambda x: u1.dat.data[x].astype(int)
-
-def cofun_as_function(c):
-    return Function(c.function_space().dual(), val=c.dat)
-
-def cofun_assign(rsource, rtarget):
-    # Workaround to call interpolate on Cofunctions, only used for restrictions
-    usource = cofun_as_function(rsource)
-    utarget = cofun_as_function(rtarget)
-    temp = Function(utarget.function_space())
-    assert temp.function_space().mesh().submesh_parent == usource.function_space().mesh() or temp.function_space().mesh() == usource.function_space().mesh().submesh_parent
-    temp.assign(usource, allow_missing_dofs=True)
-    utarget.assign(utarget + temp)
-    return rtarget

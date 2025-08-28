@@ -173,6 +173,32 @@ def plot_joint_w_uniform(dir_name, system, solver, dofs, udofs, errors_est, uerr
     for p in range(4):
         plt.loglog(dofs[p+1], errors_est[p+1], '-o', color=colors[p], alpha = 0.7, markersize=3, label=f"adaptive: {p+1}")
         plt.loglog(udofs[p+1], uerrors_est[p+1], '--v', color=colors[p], alpha = 0.5, markersize=3, label=f"uniform: {p+1}")
+     
+    def add_triangle(ax, x0, y0, slope, length=0.4, label=0, **kwargs):
+        dx = length
+        dy = -slope * dx   
+        
+        x1, y1 = x0, y0
+        x2, y2 = x0 * 10**dx, y0       
+        x3, y3 = x0, y0 * 10**(-dy)    
+        
+        ax.plot([x1, x2], [y1, y2], **kwargs)  
+        ax.plot([x1, x3], [y1, y3], **kwargs)  
+        ax.plot([x2, x3], [y2, y3], **kwargs)  
+        if label is not None:
+            xm = x0 * 0.9  
+            ym = (y1 * y3)**0.5 
+            yym = y0 * 0.5
+            xxm = (x1 * x2)**0.5 
+            ax.text(xm, ym, label, va="center", ha="right", fontsize=10) 
+            ax.text(xxm, yym, 1, va="bottom", ha="center", fontsize=10)
+
+    ax = plt.gca()
+    #NEED TO CHANGE LOCATION FOR DIFFERENT PLOTS
+    add_triangle(ax, x0=200000, y0=4, slope=0.1, label=0.1, color="k")
+    add_triangle(ax, x0=125000, y0=1e-1, slope=0.5, label=0.5, color="k")
+    add_triangle(ax, x0=200000, y0=3.5 * 1e-3, slope=1, label=1, color="k")
+    add_triangle(ax, x0=150000, y0=7 * 1e-5, slope=2, label=2, color="k")
 
     plt.xlabel("Number of degrees of freedom")
     plt.ylabel(r"Estimated energy norm $\sqrt{\sum_K \eta_K^2}$")

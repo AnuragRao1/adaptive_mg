@@ -17,6 +17,7 @@ import time
 import numpy as np
 from matplotlib import pyplot as plt
 import csv
+from mpi4py import MPI
 
 def solve_poisson(p,mesh, params):
     V = FunctionSpace(mesh, "CG", p)
@@ -143,78 +144,104 @@ mat_type="aij")
 max_iterations = 20
 theta = 0.5
 dim = 1e6
-for p in range(1,5):
-    dofs = []
-    error_estimators = []
-    amh = AdaptiveMeshHierarchy([mesh2])
-    level = 0
 
-    csv_file = f"output/poisson_L/theta={theta}_dim={dim}/{p}/dat.csv"
-    os.makedirs(os.path.dirname(csv_file), exist_ok=True)
+# for p in range(1,2):
+#     level = 0
 
-    with open(csv_file, mode='w', newline='') as f:
-        writer = csv.writer(f)
-        writer.writerow(["dof", "error_est", "time"])
+#     dofs = []
+#     error_estimators = []
+#     amh = AdaptiveMeshHierarchy([mesh2])
 
-    while level == 0 or uh.function_space().dim() < dim:
-        print(f"level {level}")
-        mesh = amh[level]
+#     csv_file = f"output/poisson_L/theta={theta}_dim={dim}/{p}/dat.csv"
+#     os.makedirs(os.path.dirname(csv_file), exist_ok=True)
 
-        start = time.time()
-        uh = solve_poisson(p, mesh, patch_relax)
-        run_time = time.time() - start
-        VTKFile(f"output/poisson_L/theta={theta}_dim={dim}/{p}/adaptive_loop_{level}.pvd").write(uh)
+#     with open(csv_file, mode='w', newline='') as f:
+#         writer = csv.writer(f)
+#         writer.writerow(["dof", "error_est", "time"])
 
-        (eta, error_est) = estimate_error(mesh, uh)
-        VTKFile(f"output/poisson_L/theta={theta}_dim={dim}/{p}/eta_{level}.pvd").write(eta)
-
-        print(f"  ||u - u_h|| <= C x {error_est}")
-        error_estimators.append(error_est)
-        dofs.append(uh.function_space().dim())
-
-        with open(csv_file, mode='a', newline='') as f:
-                writer = csv.writer(f)
-                writer.writerow([dofs[-1], error_est, run_time])
-
-        if uh.function_space().dim() < dim:
-            mesh = adapt(mesh, eta, theta)
-            amh.add_mesh(mesh)
-        print(f"DoFs: {dofs[-1]}, TIME: {time.time() - start}")
-        level += 1
+#     while level == 0 or uh.function_space().dim() < dim:
+#         print(f"level {level}")
+#         mesh = amh[level]
 
 
-def single_time_convergence(dof, est, theta, p):
-    plt.figure(figsize=(8, 6))
-    plt.grid(True)
-    plt.loglog(dof[2:], est[2:], '-o', alpha = 0.7, markersize = 4)
-    scaling = est[2] / dof[2]**-0.5
-    plt.loglog(dof[2:], scaling * dof[2:]**-0.5, '--', alpha=0.5, color="lightcoral", label="x^{-0.5}")
-    scaling = est[2] / dof[2]**-0.1
-    plt.loglog(dof[2:], scaling * dof[2:]**-0.1, '--', alpha = 0.5, color='lawngreen', label = "x^{-0.1}")
-    scaling = est[2] / dof[2]**-1
-    plt.loglog(dof[2:], scaling * dof[2:]**-1, '--', alpha = 0.5, color = 'aqua', label = "x^{-1}")
-    scaling = est[2] / dof[2]**-2
-    plt.loglog(dof[2:], scaling * dof[2:]**-2, '--', alpha = 0.5, color = 'indigo', label = "x^{-2}")
-    plt.xlabel("Number of degrees of freedom")
-    plt.ylabel(r"Estimated energy norm $\sqrt{\sum_K \eta_K^2}$")
-    plt.title(f"Estimated Error Convergence ({theta}) for p={p}")
-    plt.legend()
-    plt.savefig(f"output/poisson_L/theta={theta}_dim={dim}/{theta}_{p}_convergence.png")
+#         start = time.time()
+#         uh = solve_poisson(p, mesh, patch_relax)
+#         run_time = time.time() - start
+
+#         print(f"Completed in {run_time}")
+#         VTKFile(f"output/poisson_L/theta={theta}_dim={dim}/{p}/adaptive_loop_{level}.pvd").write(uh)
+
+#         (eta, error_est) = estimate_error(mesh, uh)
+
+#         print(f"  ||u - u_h|| <= C x {error_est}")
+#         error_estimators.append(error_est)
+#         dofs.append(uh.function_space().dim())
+
+#         with open(csv_file, mode='a', newline='') as f:
+#                 writer = csv.writer(f)
+#                 writer.writerow([dofs[-1], error_est, run_time])
+
+#         print(f"DoFs: {dofs[-1]}, TIME: {time.time() - start}")
+
+
+#         if uh.function_space().dim() < dim:
+#             mesh = adapt(mesh, eta, theta)
+#             amh.add_mesh(mesh)
+#         level += 1
+
+
+# def single_time_convergence(dof, est, theta, p):
+#     plt.figure(figsize=(8, 6))
+#     plt.grid(True)
+#     plt.loglog(dof[2:], est[2:], '-o', alpha = 0.7, markersize = 4)
+#     scaling = est[2] / dof[2]**-0.5
+#     plt.loglog(dof[2:], scaling * dof[2:]**-0.5, '--', alpha=0.5, color="lightcoral", label="x^{-0.5}")
+#     scaling = est[2] / dof[2]**-0.1
+#     plt.loglog(dof[2:], scaling * dof[2:]**-0.1, '--', alpha = 0.5, color='lawngreen', label = "x^{-0.1}")
+#     scaling = est[2] / dof[2]**-1
+#     plt.loglog(dof[2:], scaling * dof[2:]**-1, '--', alpha = 0.5, color = 'aqua', label = "x^{-1}")
+#     scaling = est[2] / dof[2]**-2
+#     plt.loglog(dof[2:], scaling * dof[2:]**-2, '--', alpha = 0.5, color = 'indigo', label = "x^{-2}")
+#     plt.xlabel("Number of degrees of freedom")
+#     plt.ylabel(r"Estimated energy norm $\sqrt{\sum_K \eta_K^2}$")
+#     plt.title(f"Estimated Error Convergence ({theta}) for p={p}")
+#     plt.legend()
+#     plt.savefig(f"output/poisson_L/theta={theta}_dim={dim}/{theta}_{p}_convergence.png")
     
 
-import matplotlib.pyplot as plt
-import numpy as np
-for p in range(1, 5):
-    for theta in [0, 0.5]:
-        with open(f"output/poisson_L/theta={theta}_dim={dim}/{p}/dat.csv", "r", newline="") as f:
-            reader = csv.reader(f)
-            rows = list(reader)
-        columns = list(zip(*rows))
-        dofs = np.array(columns[0][1:], dtype=float)
-        errors_est = np.array(columns[1][1:], dtype=float)
-        times = np.array(columns[2][1:], dtype=float)
+# import matplotlib.pyplot as plt
+# import numpy as np
+# for p in range(1, 5):
+#     for theta in [0, 0.5]:
+#         with open(f"output/poisson_L/theta={theta}_dim={dim}/{p}/dat.csv", "r", newline="") as f:
+#             reader = csv.reader(f)
+#             rows = list(reader)
+#         columns = list(zip(*rows))
+#         dofs = np.array(columns[0][1:], dtype=float)
+#         errors_est = np.array(columns[1][1:], dtype=float)
+#         times = np.array(columns[2][1:], dtype=float)
 
-        single_time_convergence(dofs, errors_est, theta, p)
+#         single_time_convergence(dofs, errors_est, theta, p)
+
+def add_triangle(ax, x0, y0, slope, length=0.4, height=0.5, label=0, **kwargs):
+    dx = length
+    dy = -slope * dx   
+    
+    x1, y1 = x0, y0
+    x2, y2 = x0 * 10**dx, y0       
+    x3, y3 = x0, y0 * 10**(-dy)    
+    
+    ax.plot([x1, x2], [y1, y2], **kwargs)  
+    ax.plot([x1, x3], [y1, y3], **kwargs)  
+    ax.plot([x2, x3], [y2, y3], **kwargs) 
+    
+    if label is not None:
+        xm = x0 * 0.9  
+        ym = (y1 * y3)**0.5 
+        yym = y0 * 0.5
+        xxm = (x1 * x2)**0.5 
+        ax.text(xm, ym, label, va="center", ha="right", fontsize=10) 
+        ax.text(xxm, yym, 1, va="bottom", ha="center", fontsize=10)
 
 
 plt.figure(figsize=(8,6))
@@ -234,6 +261,12 @@ for p in range(1,5):
             plt.loglog(dofs, errors_est, '-o', markersize = 3, alpha=0.5, color = colors[p-1], label=f"adaptive: {p}")
         else:
             plt.loglog(dofs, errors_est, "--v", markersize = 3, alpha = 0.5, color = colors[p-1], label=f"uniform: {p}")
+
+ax = plt.gca()
+# add_triangle(ax, x0=500000, y0=0.01, slope=0.1, label=0.1, color="k")
+add_triangle(ax, x0=130000, y0=0.007, slope=0.5, label=0.5 ,color="k")
+add_triangle(ax, x0=300000, y0=4.5 * 1e-5, slope=1, label=1, color="k")
+add_triangle(ax, x0=100000, y0=3.5 * 1e-7, slope=2, label=2, color="k")
 plt.xlabel("Number of DoFs")
 plt.ylabel(r"Error estimate of energy norm $\sqrt{\sum_K \eta_K^2}$")
 plt.title("Convergence of Error Estimator")
