@@ -207,7 +207,7 @@ def run_div(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "direct
     asm_relax = mg_params({
     "pc_type": "python",
     "pc_python_type": "firedrake.ASMStarPC",
-    "pc_star_backend_type": "tinyasm"})
+    "pc_star_backend": "tinyasm"})
 
     jacobi_relax = mg_params({"pc_type": "jacobi"}, mat_type="matfree")
     chol = {"mat_type": "aij",
