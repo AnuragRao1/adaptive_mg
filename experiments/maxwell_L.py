@@ -106,8 +106,6 @@ def run_maxwell(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "di
 
         if experiment == "donut":
             r = sqrt(x**2 + y**2)
-            theta = atan2(y, x)
-            theta = conditional(lt(theta, 0), theta + 2 * pi, theta) # map to [0 , 2pi]
             chi = conditional(lt(r, 0.1), exp(- (0.1**2) / (0.1**2 - r**2)), 0)
             return as_vector([chi * r**alpha * x, chi * r**alpha * y])
         elif experiment == "bump":
