@@ -44,72 +44,50 @@ Now we can define a simple Poisson Problem
 Our approach strongly follows the similar problem in this `lecture course <https://github.com/pefarrell/icerm2024>`_. We define the function solve_poisson. The first lines correspond to finding a solution in the CG1 space. The variational problem is formulated with F, where f is the constant function equal to 1. Since we want Dirichlet boundary conditions, we construct the DirichletBC object and apply it to the entire boundary: ::
 
    def solve_poisson(mesh, params):
-    V = FunctionSpace(mesh, "CG", 1)
-    uh = Function(V, name="Solution")
-    v = TestFunction(V)
-    bc = DirichletBC(V, Constant(0), "on_boundary")
-    f = Constant(1)
-    F = inner(grad(uh), grad(v))*dx - inner(f, v)*dx
+      V = FunctionSpace(mesh, "CG", 1)
+      uh = Function(V, name="Solution")
+      v = TestFunction(V)
+      bc = DirichletBC(V, Constant(0), "on_boundary")
+      f = Constant(1)
+      F = inner(grad(uh), grad(v))*dx - inner(f, v)*dx
 
-    problem = NonlinearVariationalProblem(F, uh, bc)
+      problem = NonlinearVariationalProblem(F, uh, bc)
+      solver = NonlinearVariationalSolver(problem, solver_parameters=params)
+      solver.set_transfer_manager(atm)
+      solver.solve()
+      return uh
 
-    dm = uh.function_space().dm
-    old_appctx = get_appctx(dm)
-    mat_type = params["mat_type"]
-    appctx = _SNESContext(problem, mat_type, mat_type, old_appctx)
-    appctx.transfer_manager = atm
-    solver = NonlinearVariationalSolver(problem, solver_parameters=params)
-    solver.set_transfer_manager(atm)
-    with dmhooks.add_hooks(dm, solver, appctx=appctx, save=False):
-        coarsen(problem, coarsen)
-
-    solver.solve()
-    return uh
-
-Note the code after the construction of the NonlinearVariationalProblem(). To use the AdaptiveMeshHierarchy with the existing Firedrake solver, we have to execute the intermediate lines before we call solver.solve(). 
-The AdaptiveTransferManager has to be set to the appctx and solver in order to use a multigrid solver.
+Note the code after the construction of the NonlinearVariationalProblem(). To use the AdaptiveMeshHierarchy with the existing Firedrake solver, we have to set the AdaptiveTransferManager as the transfer manager of the multigrid solver.
 For the parameters of the multigrid solver, we will be using patch relaxation, which we define with ::
-   lu = {
-           "ksp_type": "preonly",
-           "pc_type": "lu"
-       }
-   assembled_lu = {
-           "ksp_type": "preonly",
-           "pc_type": "python",
-           "pc_python_type": "firedrake.AssembledPC",
-           "assembled": lu
-       }
-   def mg_params(relax, mat_type="aij"):
-       if mat_type == "aij":
-           coarse = lu
-       else:
-           coarse = assembled_lu
-   
-       return {
-           "mat_type": mat_type,
-           "ksp_type": "cg",
-           "pc_type": "mg",
-           "mg_levels": {
-               "ksp_type": "chebyshev",
-               "ksp_max_it": 1,
-               **relax
-           },
-           "mg_coarse": coarse
-       }
-   patch_relax = mg_params({
-   "pc_type": "python",
-   "pc_python_type": "firedrake.PatchPC",
-   "patch": {
-       "pc_patch": {
-           "construct_type": "star",
-           "construct_dim": 0,
-           "sub_mat_type": "seqdense",
-           "dense_inverse": True,
-           "save_operators": True,
-           "precompute_element_tensors": True},
-       "sub_ksp_type": "preonly",
-       "sub_pc_type": "lu"}},
-   mat_type="aij")
+   solver_params = {
+            "mat_type": "matfree",
+            "ksp_type": "cg",
+            "pc_type": "mg",
+            "mg_levels": {
+                "ksp_type": "chebyshev",
+                "ksp_max_it": 1,
+                "pc_type": "python",
+                "pc_python_type": "firedrake.PatchPC",
+                "patch": {
+                    "pc_patch": {
+                        "construct_type": "star",
+                        "construct_dim": 0,
+                        "sub_mat_type": "seqdense",
+                        "dense_inverse": True,
+                        "save_operators": True,
+                        "precompute_element_tensors": True,
+                    },
+                    "sub_ksp_type": "preonly",
+                    "sub_pc_type": "lu",
+                },
+            },
+            "mg_coarse": {
+                "ksp_type": "preonly",
+                "pc_type": "python",
+                "pc_python_type": "firedrake.AssembledPC",
+                "assembled": {"ksp_type": "preonly", "pc_type": "lu"},
+            },
+        }
 
 For more information about patch relaxation, see `Using patch relaxation for multigrid <https://www.firedrakeproject.org/demos/poisson_mg_patches.py.html>`_. The initial solution is shown below
 
@@ -162,27 +140,7 @@ The next step is to choose which elements to refine. For this we Dörfler markin
 .. math::
    \eta_K \geq \theta \text{max}_L \eta_L
 
-The logic is to select an element :math:`K` to refine if the estimator is greater than some factor :math:`\theta` of the maximum error estimate of the mesh, where :math:`\theta` ranges from 0 to 1. In our code we choose :math:`theta=0.5`. We implement this in the following function::
-
-   def adapt(mesh, eta):
-       W = FunctionSpace(mesh, "DG", 0)
-       markers = Function(W)
-   
-       # We decide to refine an element if its error indicator
-       # is within a fraction of the maximum cellwise error indicator
-   
-       # Access storage underlying our Function
-       # (a PETSc Vec) to get maximum value of eta
-       with eta.dat.vec_ro as eta_:
-           eta_max = eta_.max()[1]
-   
-       theta = 0.5
-       should_refine = conditional(gt(eta, theta*eta_max), 1, 0)
-       markers.interpolate(should_refine)
-   
-       refined_mesh = mesh.refine_marked_elements(markers)
-       return refined_mesh
-
+The logic is to select an element :math:`K` to refine if the estimator is greater than some factor :math:`\theta` of the maximum error estimate of the mesh, where :math:`\theta` ranges from 0 to 1. In our code we choose :math:`theta=0.5`.
 With these helper functions complete, we can solve the system iteratively. In the max_iterations is the number of total levels we want to perform multigrid on. We will solve for 15 levels. At every level :math:`l`, we first compute the solution using multigrid with patch relaxation up till level :math:`l`. We then use the current approximation of the solution to estimate the error across the mesh. Finally, we refine the mesh and repeat. ::
 
    max_iterations = 15
@@ -201,19 +159,11 @@ With these helper functions complete, we can solve the system iteratively. In th
        error_estimators.append(error_est)
        dofs.append(uh.function_space().dim())
    
-       mesh = adapt(mesh, eta)
        if i != max_iterations - 1:
-           amh.add_mesh(mesh)
+           amh.adapt(eta, theta)
 
-To add the mesh to the AdaptiveMeshHierarchy, we us the amh.add_mesh() method. In this method the input is the refined mesh. There is another method for adding a mesh to the hierarchy. This is the amh.refine([to_refine]). In this method, to_refine is a list of 1's or 0's, where a 1 at index i means the elements[i] should be refined. It is important to note that this method assumes the input list considers the elements in the order than Netgen enumerates them, not Firedrake. This enumeration can be found with ::
-
-   for l, el in enumerate(ngmesh.Elements2D()):
-
-or alternatively to access it from the Firedrake mesh, ::
-
-   for l, el in enumerate(mesh.netgen_mesh.Elements2D()):
-
-The meshes now refine according to the error estimator. The error estimators levels 3,5, and 15 are shown below. Zooming into the vertex of the L at level 15 shows the error indicator remains strongest there. Further refinements will focus on that area.
+To perform Dörfler marking, refine the current mesh, and add the mesh to the AdaptiveMeshHierarchy, we us the amh.adapt(eta, theta) method. In this method the input is the recently computed error estimator :math:`eta` and the Dörfler marking parameter :math:`theta`. The method always performs this on the current fine mesh in the hierarchy. There is another method for adding a mesh to the hierarchy. This is the amh.add_mesh(mesh). In this method, refinement on the mesh is performed externally by some custom procedure and the resulting mesh directly gets added to the hierarchy.
+The meshes now refine according to the error estimator. The error estimators at levels 3,5, and 15 are shown below. Zooming into the vertex of the L at level 15 shows the error indicator remains strongest there. Further refinements will focus on that area.
 
 +-------------------------------+-------------------------------+-------------------------------+
 | .. figure:: eta_l3.png        | .. figure:: eta_l6.png        | .. figure:: eta_l15.png       |
