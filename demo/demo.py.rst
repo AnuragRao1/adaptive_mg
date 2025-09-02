@@ -9,6 +9,7 @@ We begin by importing the necessary libraries ::
 
    from firedrake import *
    from netgen.occ import *
+   from ngsPETSc import AdaptiveMeshHierarchy, AdaptiveTransferManager
 
 Constructing the Mesh Hierarchy
 ---------------------------
