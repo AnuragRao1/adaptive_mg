@@ -53,7 +53,7 @@ def amh(request):
 
     ngmesh = geo.GenerateMesh(maxh=maxh)
     base = Mesh(ngmesh)
-    amh_test = AdaptiveMeshHierarchy([base])
+    amh_test = AdaptiveMeshHierarchy(base)
 
     if dim == 2:
         els = ngmesh.Elements2D()

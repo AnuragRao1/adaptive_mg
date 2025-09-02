@@ -65,11 +65,6 @@ class AdaptiveTransferManager(TransferManager):
                 target_function_splits = amh.split_function(curr_target, child=False)
 
             for split_label, _ in source_function_splits.items():
-                if split_label == 1:
-                    print(split_label)
-                    source_unsplit = source_function_splits[split_label]
-                    target_function_splits[split_label].assign(source_unsplit, allow_missing_dofs=True)
-                        
                 transfer_op(
                     source_function_splits[split_label],
                     target_function_splits[split_label],
