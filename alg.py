@@ -245,17 +245,8 @@ def attempt_solve(F, u, bcs, atm):
     for i, params in enumerate(solver_configs):
 
         problem = NonlinearVariationalProblem(F, u, bcs)
-        dm = u.function_space().dm
-        old_appctx = get_appctx(dm)
-        mat_type = "aij"
-        appctx = _SNESContext(problem, mat_type, mat_type, old_appctx)
-        appctx.transfer_manager = atm
         solver = NonlinearVariationalSolver(problem, solver_parameters=params)
         solver.set_transfer_manager(atm)
-        with dmhooks.add_hooks(dm, solver, appctx=appctx, save=False):
-            coarsen(problem, coarsen)
-
-
         
         solver.solve()
         print("SOLVED")

@@ -1,3 +1,6 @@
+"""
+Poisson experiment on the L-shaped domain. The code commented at the  bottom was to generate the plots
+"""
 from firedrake import *
 from netgen.occ import *
 
@@ -8,16 +11,8 @@ from adaptive import AdaptiveMeshHierarchy
 from adaptive_transfer_manager import AdaptiveTransferManager
 from adaptive import AdaptiveMeshHierarchy
 from adaptive_transfer_manager import AdaptiveTransferManager
-from firedrake.mg.ufl_utils import coarsen
-from firedrake.dmhooks import get_appctx
-from firedrake import dmhooks
-from firedrake.solving_utils import _SNESContext
 import time
-
-import numpy as np
-from matplotlib import pyplot as plt
 import csv
-from mpi4py import MPI
 
 def solve_poisson(p,mesh, params):
     V = FunctionSpace(mesh, "CG", p)
@@ -28,16 +23,8 @@ def solve_poisson(p,mesh, params):
     F = inner(grad(uh), grad(v))*dx - inner(f, v)*dx
     
     problem = NonlinearVariationalProblem(F, uh, bc)
-
-    dm = uh.function_space().dm
-    old_appctx = get_appctx(dm)
-    mat_type = params["mat_type"]
-    appctx = _SNESContext(problem, mat_type, mat_type, old_appctx)
-    appctx.transfer_manager = atm
     solver = NonlinearVariationalSolver(problem, solver_parameters=params)
     solver.set_transfer_manager(atm)
-    with dmhooks.add_hooks(dm, solver, appctx=appctx, save=False):
-        coarsen(problem, coarsen)
 
     solver.solve()
     return uh
@@ -143,51 +130,51 @@ mat_type="aij")
 
 max_iterations = 20
 theta = 0.5
-dim = 1e6
+dim = 1e3
 
-# for p in range(1,2):
-#     level = 0
+for p in range(1,2):
+    level = 0
 
-#     dofs = []
-#     error_estimators = []
-#     amh = AdaptiveMeshHierarchy([mesh2])
+    dofs = []
+    error_estimators = []
+    amh = AdaptiveMeshHierarchy([mesh2])
 
-#     csv_file = f"output/poisson_L/theta={theta}_dim={dim}/{p}/dat.csv"
-#     os.makedirs(os.path.dirname(csv_file), exist_ok=True)
+    csv_file = f"output/poisson_L/theta={theta}_dim={dim}/{p}/dat.csv"
+    os.makedirs(os.path.dirname(csv_file), exist_ok=True)
 
-#     with open(csv_file, mode='w', newline='') as f:
-#         writer = csv.writer(f)
-#         writer.writerow(["dof", "error_est", "time"])
+    with open(csv_file, mode='w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(["dof", "error_est", "time"])
 
-#     while level == 0 or uh.function_space().dim() < dim:
-#         print(f"level {level}")
-#         mesh = amh[level]
-
-
-#         start = time.time()
-#         uh = solve_poisson(p, mesh, patch_relax)
-#         run_time = time.time() - start
-
-#         print(f"Completed in {run_time}")
-#         VTKFile(f"output/poisson_L/theta={theta}_dim={dim}/{p}/adaptive_loop_{level}.pvd").write(uh)
-
-#         (eta, error_est) = estimate_error(mesh, uh)
-
-#         print(f"  ||u - u_h|| <= C x {error_est}")
-#         error_estimators.append(error_est)
-#         dofs.append(uh.function_space().dim())
-
-#         with open(csv_file, mode='a', newline='') as f:
-#                 writer = csv.writer(f)
-#                 writer.writerow([dofs[-1], error_est, run_time])
-
-#         print(f"DoFs: {dofs[-1]}, TIME: {time.time() - start}")
+    while level == 0 or uh.function_space().dim() < dim:
+        print(f"level {level}")
+        mesh = amh[level]
 
 
-#         if uh.function_space().dim() < dim:
-#             mesh = adapt(mesh, eta, theta)
-#             amh.add_mesh(mesh)
-#         level += 1
+        start = time.time()
+        uh = solve_poisson(p, mesh, patch_relax)
+        run_time = time.time() - start
+
+        print(f"Completed in {run_time}")
+        VTKFile(f"output/poisson_L/theta={theta}_dim={dim}/{p}/adaptive_loop_{level}.pvd").write(uh)
+
+        (eta, error_est) = estimate_error(mesh, uh)
+
+        print(f"  ||u - u_h|| <= C x {error_est}")
+        error_estimators.append(error_est)
+        dofs.append(uh.function_space().dim())
+
+        with open(csv_file, mode='a', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow([dofs[-1], error_est, run_time])
+
+        print(f"DoFs: {dofs[-1]}, TIME: {time.time() - start}")
+
+
+        if uh.function_space().dim() < dim:
+            mesh = adapt(mesh, eta, theta)
+            amh.add_mesh(mesh)
+        level += 1
 
 
 # def single_time_convergence(dof, est, theta, p):
@@ -223,55 +210,55 @@ dim = 1e6
 
 #         single_time_convergence(dofs, errors_est, theta, p)
 
-def add_triangle(ax, x0, y0, slope, length=0.4, height=0.5, label=0, **kwargs):
-    dx = length
-    dy = -slope * dx   
+# def add_triangle(ax, x0, y0, slope, length=0.4, height=0.5, label=0, **kwargs):
+#     dx = length
+#     dy = -slope * dx   
     
-    x1, y1 = x0, y0
-    x2, y2 = x0 * 10**dx, y0       
-    x3, y3 = x0, y0 * 10**(-dy)    
+#     x1, y1 = x0, y0
+#     x2, y2 = x0 * 10**dx, y0       
+#     x3, y3 = x0, y0 * 10**(-dy)    
     
-    ax.plot([x1, x2], [y1, y2], **kwargs)  
-    ax.plot([x1, x3], [y1, y3], **kwargs)  
-    ax.plot([x2, x3], [y2, y3], **kwargs) 
+#     ax.plot([x1, x2], [y1, y2], **kwargs)  
+#     ax.plot([x1, x3], [y1, y3], **kwargs)  
+#     ax.plot([x2, x3], [y2, y3], **kwargs) 
     
-    if label is not None:
-        xm = x0 * 0.9  
-        ym = (y1 * y3)**0.5 
-        yym = y0 * 0.5
-        xxm = (x1 * x2)**0.5 
-        ax.text(xm, ym, label, va="center", ha="right", fontsize=10) 
-        ax.text(xxm, yym, 1, va="bottom", ha="center", fontsize=10)
+#     if label is not None:
+#         xm = x0 * 0.9  
+#         ym = (y1 * y3)**0.5 
+#         yym = y0 * 0.5
+#         xxm = (x1 * x2)**0.5 
+#         ax.text(xm, ym, label, va="center", ha="right", fontsize=10) 
+#         ax.text(xxm, yym, 1, va="bottom", ha="center", fontsize=10)
 
 
-plt.figure(figsize=(8,6))
-plt.grid(True)
-colors = ['blue', 'green', 'red', 'purple'] 
-for p in range(1,5):
-    for theta in [0, 0.5]:    
-        with open(f"output/poisson_L/theta={theta}_dim={dim}/{p}/dat.csv", "r", newline="") as f:
-            reader = csv.reader(f)
-            rows = list(reader)
-        columns = list(zip(*rows))
-        dofs = np.array(columns[0][1:], dtype=float)
-        errors_est = np.array(columns[1][1:], dtype=float)
-        times = np.array(columns[2][1:], dtype=float)
+# plt.figure(figsize=(8,6))
+# plt.grid(True)
+# colors = ['blue', 'green', 'red', 'purple'] 
+# for p in range(1,5):
+#     for theta in [0, 0.5]:    
+#         with open(f"output/poisson_L/theta={theta}_dim={dim}/{p}/dat.csv", "r", newline="") as f:
+#             reader = csv.reader(f)
+#             rows = list(reader)
+#         columns = list(zip(*rows))
+#         dofs = np.array(columns[0][1:], dtype=float)
+#         errors_est = np.array(columns[1][1:], dtype=float)
+#         times = np.array(columns[2][1:], dtype=float)
 
-        if theta == 0.5:
-            plt.loglog(dofs, errors_est, '-o', markersize = 3, alpha=0.5, color = colors[p-1], label=f"adaptive: {p}")
-        else:
-            plt.loglog(dofs, errors_est, "--v", markersize = 3, alpha = 0.5, color = colors[p-1], label=f"uniform: {p}")
+#         if theta == 0.5:
+#             plt.loglog(dofs, errors_est, '-o', markersize = 3, alpha=0.5, color = colors[p-1], label=f"adaptive: {p}")
+#         else:
+#             plt.loglog(dofs, errors_est, "--v", markersize = 3, alpha = 0.5, color = colors[p-1], label=f"uniform: {p}")
 
-ax = plt.gca()
-# add_triangle(ax, x0=500000, y0=0.01, slope=0.1, label=0.1, color="k")
-add_triangle(ax, x0=130000, y0=0.007, slope=0.5, label=0.5 ,color="k")
-add_triangle(ax, x0=300000, y0=4.5 * 1e-5, slope=1, label=1, color="k")
-add_triangle(ax, x0=100000, y0=3.5 * 1e-7, slope=2, label=2, color="k")
-plt.xlabel("Number of DoFs")
-plt.ylabel(r"Error estimate of energy norm $\sqrt{\sum_K \eta_K^2}$")
-plt.title("Convergence of Error Estimator")
-plt.legend()
-plt.savefig(f"output/poisson_L/theta={theta}_dim={dim}/joint_adaptive_convergence.png")
-plt.show()
+# ax = plt.gca()
+# # add_triangle(ax, x0=500000, y0=0.01, slope=0.1, label=0.1, color="k")
+# add_triangle(ax, x0=130000, y0=0.007, slope=0.5, label=0.5 ,color="k")
+# add_triangle(ax, x0=300000, y0=4.5 * 1e-5, slope=1, label=1, color="k")
+# add_triangle(ax, x0=100000, y0=3.5 * 1e-7, slope=2, label=2, color="k")
+# plt.xlabel("Number of DoFs")
+# plt.ylabel(r"Error estimate of energy norm $\sqrt{\sum_K \eta_K^2}$")
+# plt.title("Convergence of Error Estimator")
+# plt.legend()
+# plt.savefig(f"output/poisson_L/theta={theta}_dim={dim}/joint_adaptive_convergence.png")
+# plt.show()
 
 

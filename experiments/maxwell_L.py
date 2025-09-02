@@ -2,17 +2,11 @@ import numpy as np
 dot_prod = np.dot
 from firedrake import *
 from netgen.occ import *
-from firedrake.mg.ufl_utils import coarsen
-from firedrake.dmhooks import get_appctx
-from firedrake import dmhooks
-from firedrake.solving_utils import _SNESContext
 from firedrake.mg.utils import get_level
-from itertools import accumulate
 
 
 import time
 import csv
-import ufl
 import json
 
 import sys
@@ -39,16 +33,8 @@ def run_maxwell(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "di
         F = (inner(curl(uh), curl(v)) + inner(uh, v) - inner(f_expr,v)) * dx
         
         problem = NonlinearVariationalProblem(F, uh, bc)
-
-        dm = uh.function_space().dm
-        old_appctx = get_appctx(dm)
-        mat_type = params["mat_type"]
-        appctx = _SNESContext(problem, mat_type, mat_type, old_appctx)
-        appctx.transfer_manager = atm
         solver = NonlinearVariationalSolver(problem, solver_parameters=params)
         solver.set_transfer_manager(atm)
-        # with dmhooks.add_hooks(dm, solver, appctx=appctx, save=False):
-        #     coarsen(problem, coarsen)
 
         _, level = get_level(mesh)
         with PETSc.Log.Event(f"adaptive_{level}"):
