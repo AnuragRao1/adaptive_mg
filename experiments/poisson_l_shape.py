@@ -82,7 +82,7 @@ geo = OCCGeometry(L, dim=2)
 ngmsh = geo.GenerateMesh(maxh=0.5)
 mesh = Mesh(ngmsh)
 mesh2 = Mesh(ngmsh)
-amh = AdaptiveMeshHierarchy([mesh])
+amh = AdaptiveMeshHierarchy(mesh)
 atm = AdaptiveTransferManager()
 
 

@@ -162,7 +162,7 @@ def run_kellogg(p=2, theta=0.5, lam_alg=0.01, dim=1e3, solver="direct"):
         ngmesh.Refine(adaptive=True)
     mesh = Mesh(ngmesh)
 
-    amh = AdaptiveMeshHierarchy([mesh])
+    amh = AdaptiveMeshHierarchy(mesh)
     atm = AdaptiveTransferManager()
     tm = TransferManager()
     

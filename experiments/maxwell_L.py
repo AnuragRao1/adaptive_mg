@@ -144,7 +144,7 @@ def run_maxwell(p=1, theta=0.5, lam_alg=0.01, alpha = 2/3, dim=1e3, solver = "di
 
     
 
-    amh = AdaptiveMeshHierarchy([mesh])
+    amh = AdaptiveMeshHierarchy(mesh)
     atm = AdaptiveTransferManager()
     tm = TransferManager()
     
